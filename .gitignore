@@ -1,0 +1,47 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Large datasets and metadata
+data/raw/
+data/processed/
+data/processed_grouped/
+*.zip
+
+# Temporary files and generated exports
+artifacts/exports/
+artifacts/checkpoints/smoke_test/
+*.tmp
+*.log
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE configuration
+.vscode/
+.idea/
+
+# Environment variables and secrets
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Test coverage
+.coverage
+htmlcov/
