@@ -69,7 +69,10 @@ class UNetSegmenter(BaseSegmenter):
         # Resolve architecture from checkpoint metadata;
         # fall back to custom_unet for legacy checkpoints.
         self._arch = checkpoint.get("arch", "custom_unet")
-        self._model = build_model(self._arch)
+        self._model = build_model(
+            self._arch,
+            pretrained=False,
+        )
 
         self._model.load_state_dict(
             checkpoint["model_state_dict"]
@@ -82,6 +85,42 @@ class UNetSegmenter(BaseSegmenter):
         self._uses_imagenet = uses_imagenet_normalization(
             self._arch
         )
+
+
+    @classmethod
+    def from_architecture(
+        cls,
+        architecture: str,
+        *,
+        device=None,
+        threshold: float = 0.5,
+        project_root=None,
+    ):
+        """Load a trained model using its architecture name."""
+
+        from src.models.artifacts import ModelArtifactRegistry
+
+        registry = ModelArtifactRegistry(project_root)
+
+        checkpoint = registry.require_checkpoint(
+            architecture
+        )
+
+        segmenter = cls(
+            checkpoint,
+            device=device,
+            threshold=threshold,
+        )
+
+        if segmenter.arch != architecture:
+            raise ValueError(
+                f"Checkpoint architecture mismatch. "
+                f"Expected '{architecture}', "
+                f"found '{segmenter.arch}'."
+            )
+
+        return segmenter
+
 
     @property
     def name(self):

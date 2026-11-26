@@ -1,20 +1,15 @@
+
 """
 Model factory for SkinSegAI.
 
-Provides a single entry point to construct any supported segmentation
-architecture by name.  Keeps the original custom U-Net untouched and
-adds pretrained-encoder variants via segmentation-models-pytorch (smp).
+Supports custom and pretrained-encoder U-Net architectures.
+Separates training initialization from offline inference.
 """
 
 import torch.nn as nn
-import segmentation_models_pytorch as smp
 
 from src.models.unet import UNet
 
-
-# ------------------------------------------------------------------ #
-#  Registry of supported architectures                                #
-# ------------------------------------------------------------------ #
 
 SUPPORTED_ARCHITECTURES = (
     "custom_unet",
@@ -23,62 +18,65 @@ SUPPORTED_ARCHITECTURES = (
 )
 
 
-# ------------------------------------------------------------------ #
-#  ImageNet channel-wise statistics (used by pretrained encoders)      #
-# ------------------------------------------------------------------ #
-
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_STD  = (0.229, 0.224, 0.225)
+IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
 def uses_imagenet_normalization(arch: str) -> bool:
-    """Return True when *arch* expects ImageNet mean/std preprocessing."""
-    return arch in ("resnet34_unet", "efficientnet_b2_unet")
+    """Return whether the architecture uses ImageNet normalization."""
+
+    return arch in (
+        "resnet34_unet",
+        "efficientnet_b2_unet",
+    )
 
 
-# ------------------------------------------------------------------ #
-#  Factory function                                                    #
-# ------------------------------------------------------------------ #
-
-def build_model(arch: str = "resnet34_unet") -> nn.Module:
-    """Construct a segmentation model by architecture name.
-
-    Parameters
-    ----------
-    arch : str
-        One of :data:`SUPPORTED_ARCHITECTURES`.
-
-    Returns
-    -------
-    nn.Module
-        An uninitialised (or pretrained-encoder) segmentation model that
-        maps ``(B, 3, H, W)`` → ``(B, 1, H, W)`` raw logits.
-
-    Raises
-    ------
-    ValueError
-        If *arch* is not recognised.
+def build_model(
+    arch: str = "resnet34_unet",
+    *,
+    pretrained: bool = True,
+) -> nn.Module:
     """
+    Construct a supported segmentation model.
+
+    pretrained=True:
+        Initialize encoder with ImageNet weights for training.
+
+    pretrained=False:
+        Construct architecture without downloading weights,
+        allowing offline checkpoint loading.
+    """
+
+    if arch not in SUPPORTED_ARCHITECTURES:
+        raise ValueError(
+            f"Unknown architecture '{arch}'. "
+            f"Supported: {SUPPORTED_ARCHITECTURES}"
+        )
+
     if arch == "custom_unet":
-        return UNet(in_channels=3, out_channels=1)
-
-    if arch == "resnet34_unet":
-        return smp.Unet(
-            encoder_name="resnet34",
-            encoder_weights="imagenet",
+        return UNet(
             in_channels=3,
-            classes=1,
+            out_channels=1,
         )
 
-    if arch == "efficientnet_b2_unet":
-        return smp.Unet(
-            encoder_name="efficientnet-b2",
-            encoder_weights="imagenet",
-            in_channels=3,
-            classes=1,
-        )
+    try:
+        import segmentation_models_pytorch as smp
 
-    raise ValueError(
-        f"Unknown architecture '{arch}'. "
-        f"Supported: {SUPPORTED_ARCHITECTURES}"
+    except ImportError as exc:
+        raise ImportError(
+            f"Architecture '{arch}' requires "
+            "segmentation-models-pytorch. "
+            "Install the project requirements."
+        ) from exc
+
+    encoder_names = {
+        "resnet34_unet": "resnet34",
+        "efficientnet_b2_unet": "efficientnet-b2",
+    }
+
+    return smp.Unet(
+        encoder_name=encoder_names[arch],
+        encoder_weights="imagenet" if pretrained else None,
+        in_channels=3,
+        classes=1,
     )

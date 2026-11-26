@@ -136,7 +136,11 @@ def test_segmentation_service_populates_uncertainty_for_unet_only(tmp_path):
 
     assert unet_res.prob_map is not None
     assert unet_res.uncertainty_map is not None
-    assert unet_res.border_uncertainty is not None
+    if unet_res.mask.any() and not unet_res.mask.all():
+        assert unet_res.border_uncertainty is not None
+        assert 0.0 <= unet_res.border_uncertainty <= 1.0
+    else:
+        assert unet_res.border_uncertainty is None
     assert grab_res.prob_map is None
     assert grab_res.uncertainty_map is None
     assert grab_res.border_uncertainty is None
