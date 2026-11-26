@@ -318,6 +318,14 @@ Rules:
                 approved=approved,
             )
 
+    def get_analysis(self):
+        """Return verified structured analysis for trusted UI code."""
+
+        with self._lock:
+            return self._report_exporter.build_report(
+                self._session
+            )
+
     def export_report(self):
         """Export current results through trusted application code."""
         with self._lock:

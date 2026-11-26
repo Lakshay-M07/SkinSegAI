@@ -435,3 +435,423 @@ def test_invalid_configuration(client):
 
     assert context["revision"] == revision
     assert not context["analysis_completed"]
+
+
+# =====================================================
+# ASSISTANT API REGRESSION TESTS
+# =====================================================
+
+def test_assistant_chat_and_history(client):
+
+    headers, revision = create_session(client)
+
+    response = client.post(
+        "/api/v2/chat",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "message": "models",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+
+    assert body["configured_provider"] == "offline"
+    assert "Custom U-Net" in body["message"]
+    assert "ResNet-34" in body["message"]
+
+    assert body["confirmation_required"] is False
+
+    response = client.get(
+        "/api/v2/history",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    history = response.json()["history"]
+
+    assert len(history) == 2
+    assert history[0]["role"] == "user"
+    assert history[0]["content"] == "models"
+    assert history[1]["role"] == "assistant"
+
+    second, _ = create_session(client)
+
+    response = client.get(
+        "/api/v2/history",
+        headers=second,
+    )
+
+    assert response.json()["history"] == []
+
+
+def test_ollama_unavailable(client, monkeypatch):
+
+    from src.assistant.providers.ollama_provider import (
+        OllamaProvider,
+    )
+
+    monkeypatch.setattr(
+        OllamaProvider,
+        "is_available",
+        lambda self: False,
+    )
+
+    response = client.post(
+        "/api/v2/session?provider=ollama"
+    )
+
+    assert response.status_code == 503
+
+    # Failed creation must not consume a session slot.
+    create_session(client)
+    create_session(client)
+
+
+def test_chat_configuration_requires_approval(
+    client,
+    monkeypatch,
+):
+
+    from src.assistant.providers.ollama_provider import (
+        OllamaProvider,
+    )
+
+    from src.assistant.providers.base_provider import (
+        ProviderResponse,
+        ToolCall,
+    )
+
+    monkeypatch.setattr(
+        OllamaProvider,
+        "is_available",
+        lambda self: True,
+    )
+
+    def mock_chat(self, messages, *, tools=()):
+
+        return ProviderResponse(
+            tool_calls=(
+                ToolCall(
+                    "propose_configuration",
+                    {
+                        "models": ["custom_unet"],
+                        "threshold": 0.6,
+                    },
+                ),
+            )
+        )
+
+    monkeypatch.setattr(
+        OllamaProvider,
+        "chat",
+        mock_chat,
+    )
+
+    response = client.post(
+        "/api/v2/session?provider=ollama"
+    )
+
+    assert response.status_code == 201
+
+    body = response.json()
+
+    headers = {
+        "X-Session-ID": body["session_id"],
+    }
+
+    revision = upload(
+        client,
+        headers,
+        body["context"]["revision"],
+    )
+
+    response = client.post(
+        "/api/v2/chat",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "message": (
+                "Use Custom U-Net with threshold 0.6."
+            ),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+
+    assert body["configured_provider"] == "ollama"
+    assert body["used_fallback"] is False
+    assert body["confirmation_required"] is True
+
+    assert not body["context"]["analysis_completed"]
+
+    assert (
+        body["context"]["configuration"]["threshold"]
+        == 0.5
+    )
+
+    proposal = body["proposal"]
+
+    token = proposal["confirmation_token"]
+
+    response = confirm(
+        client,
+        headers,
+        token,
+    )
+
+    assert response.status_code == 200
+
+    context = response.json()["context"]
+
+    assert context["analysis_completed"]
+    assert context["configuration"]["threshold"] == 0.6
+
+    assert context["configuration"]["models"] == [
+        "custom_unet",
+    ]
+
+    assert confirm(
+        client,
+        headers,
+        token,
+    ).status_code == 409
+
+
+def test_advanced_analysis_and_report(client):
+
+    import json
+
+    from zipfile import ZipFile
+
+    headers, revision = create_session(client)
+
+    revision = upload(
+        client,
+        headers,
+        revision,
+    )
+
+    proposal = propose(
+        client,
+        headers,
+        revision,
+        ["custom_unet", "resnet34_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+    )
+
+    assert response.status_code == 200
+
+    before = response.json()["context"]
+
+    revision = before["revision"]
+
+    response = client.get(
+        "/api/v2/analysis",
+        headers=headers,
+        params={"expected_revision": revision},
+    )
+
+    assert response.status_code == 200, response.text
+
+    analysis = response.json()["analysis"]
+
+    assert analysis["uncertainty"]["available"]
+    assert analysis["model_agreement"]["available"]
+    assert analysis["threshold_sensitivity"]["available"]
+    assert analysis["image_quality"]["available"]
+
+    assert analysis["llm_generated_statistics"] is False
+    assert analysis["medical_diagnosis"] is False
+
+    response = client.get(
+        "/api/v2/report",
+        headers=headers,
+        params={"expected_revision": revision},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+
+    with ZipFile(BytesIO(response.content)) as archive:
+
+        assert archive.testzip() is None
+
+        required = {
+            "assistant/session_context.json",
+            "assistant/uncertainty.json",
+            "assistant/model_agreement.json",
+            "assistant/threshold_sensitivity.json",
+            "assistant/image_quality.json",
+            "assistant/summary.txt",
+        }
+
+        assert required.issubset(archive.namelist())
+
+        assert len(archive.namelist()) == len(
+            set(archive.namelist())
+        )
+
+        context = json.loads(
+            archive.read(
+                "assistant/session_context.json"
+            )
+        )
+
+        assert context["ground_truth_available"]
+        assert context["revision"] == revision
+
+    after = client.get(
+        "/api/v2/context",
+        headers=headers,
+    ).json()["context"]
+
+    assert before == after
+
+
+def test_analysis_and_report_without_results(client):
+
+    headers, revision = create_session(client)
+
+    for endpoint in ("analysis", "report"):
+
+        response = client.get(
+            f"/api/v2/{endpoint}",
+            headers=headers,
+            params={"expected_revision": revision},
+        )
+
+        assert response.status_code == 409
+
+
+def test_release_and_reset(client):
+
+    headers, revision = create_session(client)
+
+    revision = upload(
+        client,
+        headers,
+        revision,
+    )
+
+    proposal = propose(
+        client,
+        headers,
+        revision,
+        ["custom_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+    )
+
+    assert response.status_code == 200
+
+    before = response.json()["context"]
+
+    revision = before["revision"]
+
+    response = client.post(
+        "/api/v2/release",
+        headers=headers,
+        json={"expected_revision": revision},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["released"]
+    assert response.json()["context"] == before
+
+    response = client.post(
+        "/api/v2/chat",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "message": "status",
+        },
+    )
+
+    assert response.status_code == 200
+
+    response = client.post(
+        "/api/v2/reset",
+        headers=headers,
+        json={"expected_revision": revision},
+    )
+
+    assert response.status_code == 200
+
+    context = response.json()["context"]
+
+    assert not context["image_uploaded"]
+    assert not context["ground_truth_available"]
+    assert not context["analysis_completed"]
+
+    assert context["revision"] != revision
+
+    response = client.get(
+        "/api/v2/history",
+        headers=headers,
+    )
+
+    assert response.json()["history"] == []
+
+
+def test_chat_validation_and_stale_revision(client):
+
+    headers, revision = create_session(client)
+
+    for message in ("", " ", "x" * 4001, 123):
+
+        response = client.post(
+            "/api/v2/chat",
+            headers=headers,
+            json={
+                "expected_revision": revision,
+                "message": message,
+            },
+        )
+
+        assert response.status_code in (400, 422)
+
+    new_revision = upload(
+        client,
+        headers,
+        revision,
+    )
+
+    assert new_revision != revision
+
+    response = client.post(
+        "/api/v2/chat",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "message": "status",
+        },
+    )
+
+    assert response.status_code == 409
+
+    response = client.post(
+        "/api/v2/chat",
+        headers=headers,
+        json={
+            "expected_revision": new_revision,
+            "message": "status",
+            "approved": True,
+        },
+    )
+
+    assert response.status_code == 422

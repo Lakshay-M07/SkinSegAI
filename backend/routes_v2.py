@@ -1,6 +1,11 @@
 """Session-based segmentation API shared by manual and AI workflows."""
 
 from contextlib import contextmanager
+from typing import Literal
+
+from src.assistant.providers.ollama_provider import (
+    OllamaProvider,
+)
 
 from fastapi import (
     APIRouter,
@@ -24,6 +29,8 @@ from backend.image_io import (
 from backend.schemas_v2 import (
     ConfigurationRequest,
     ConfirmationRequest,
+    ChatRequest,
+    RevisionRequest,
 )
 
 from backend.session_manager import (
@@ -111,9 +118,28 @@ def context_payload(agent):
 
 
 @router.post("/session", status_code=201)
-def create_session(request: Request):
+def create_session(
+    request: Request,
+    provider: Literal["offline", "ollama"] = "offline",
+):
 
     manager = get_manager(request)
+
+    selected_provider = None
+
+    if provider == "ollama":
+
+        if not OllamaProvider(timeout=3).is_available():
+
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Ollama or the required local Qwen "
+                    "model is unavailable."
+                ),
+            )
+
+        selected_provider = OllamaProvider()
 
     try:
 
@@ -127,6 +153,9 @@ def create_session(request: Request):
         ) from exc
 
     with session_agent(request, session_id) as agent:
+
+        if selected_provider is not None:
+            agent.set_provider(selected_provider)
 
         return {
             "session_id": session_id,
@@ -464,3 +493,168 @@ def get_visualization(
                 "Cache-Control": "no-store",
             },
         )
+
+
+# =====================================================
+# ASSISTANT CONVERSATION
+# =====================================================
+
+@router.post("/chat")
+def chat_with_assistant(
+    payload: ChatRequest,
+    request: Request,
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        require_revision(
+            agent,
+            payload.expected_revision,
+        )
+
+        try:
+
+            reply = agent.ask(payload.message)
+
+        except (ValueError, TypeError) as exc:
+
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
+
+        return {
+            **reply,
+            "configured_provider": agent.provider_name,
+            "context": agent.get_context(),
+        }
+
+
+@router.get("/history")
+def get_conversation_history(
+    request: Request,
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        return {
+            "revision": agent.get_context()["revision"],
+            "history": agent.get_history(),
+            "statistics": agent.get_memory_statistics(),
+        }
+
+
+# =====================================================
+# STRUCTURED ANALYSIS
+# =====================================================
+
+@router.get("/analysis")
+def get_advanced_analysis(
+    request: Request,
+    expected_revision: int,
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        require_revision(agent, expected_revision)
+
+        context = agent.get_context()
+
+        if not context["analysis_completed"]:
+
+            raise HTTPException(
+                status_code=409,
+                detail="Complete segmentation first.",
+            )
+
+        return {
+            "revision": context["revision"],
+            "analysis": agent.get_analysis(),
+        }
+
+
+# =====================================================
+# ENHANCED REPORT EXPORT
+# =====================================================
+
+@router.get("/report")
+def download_report(
+    request: Request,
+    expected_revision: int,
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        require_revision(agent, expected_revision)
+
+        if not agent.get_context()["analysis_completed"]:
+
+            raise HTTPException(
+                status_code=409,
+                detail="Complete segmentation before exporting.",
+            )
+
+        report = agent.export_report()
+
+        return Response(
+            content=report,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": (
+                    'attachment; filename="SkinSegAI_Report.zip"'
+                ),
+                "Cache-Control": "no-store",
+            },
+        )
+
+
+# =====================================================
+# SESSION RESOURCE MANAGEMENT
+# =====================================================
+
+@router.post("/release")
+def release_models(
+    payload: RevisionRequest,
+    request: Request,
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        require_revision(
+            agent,
+            payload.expected_revision,
+        )
+
+        agent.release_models()
+
+        return {
+            "released": True,
+            **context_payload(agent),
+        }
+
+
+@router.post("/reset")
+def reset_session(
+    payload: RevisionRequest,
+    request: Request,
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        require_revision(
+            agent,
+            payload.expected_revision,
+        )
+
+        response = agent.reset()
+
+        return {
+            **response,
+            **context_payload(agent),
+        }

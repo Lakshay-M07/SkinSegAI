@@ -54,3 +54,21 @@ class ConfirmationRequest(BaseModel):
     )
 
     approved: bool
+
+
+class RevisionRequest(BaseModel):
+
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+    )
+
+    expected_revision: int = Field(ge=0)
+
+
+class ChatRequest(RevisionRequest):
+
+    message: str = Field(
+        min_length=1,
+        max_length=4000,
+    )
