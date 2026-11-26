@@ -7,10 +7,6 @@ from src.assistant.analysis.response_composer import (
     GroundedResponseComposer,
 )
 
-from src.assistant.tools.report_tools import (
-    AssistantReportExporter,
-)
-
 from threading import RLock
 
 from src.assistant.tools.report_tools import (
@@ -260,16 +256,6 @@ Rules:
                 "context": self._session.get_context(),
             }
 
-        def release_models(self):
-            """Release cached segmentation models."""
-
-        if self._stage == ConversationStage.EXECUTING:
-            raise RuntimeError(
-                "Cannot release models during segmentation."
-            )
-
-        self._segmentation_tool.clear_cache()
-
     def begin(self):
 
         with self._lock:
@@ -335,15 +321,18 @@ Rules:
 
     def release_models(self):
         """Release cached models without deleting results."""
+
         with self._lock:
-               self._workflow.release_models()
+            self._workflow.release_models()
 
     def reset(self):
-            with self._lock:
-                self._workflow.release_models()
-                self._session.reset()
-                self._memory.clear()
-                return self._workflow.begin()
+        """Clear session state and release cached models."""
+
+        with self._lock:
+            self._workflow.release_models()
+            self._session.reset()
+            self._memory.clear()
+            return self._workflow.begin()
 
     def _build_messages(self, message):
 

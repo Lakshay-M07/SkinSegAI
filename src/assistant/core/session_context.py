@@ -249,6 +249,10 @@ class SessionContext:
 
         self._results = validated
 
+        # Every successfully completed analysis has a
+        # distinct revision, even with identical settings.
+        self._revision += 1
+
     def get_result(self, algorithm):
         """Retrieve an existing result by algorithm name."""
 

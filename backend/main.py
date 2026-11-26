@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 from backend.routes import router
 from backend.routes_v2 import router as router_v2
 from backend.session_manager import SessionManager
+from backend.middleware import APIProtectionMiddleware
 from backend.services import SkinSegBackendService
 
 
@@ -42,6 +43,8 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    app.add_middleware(APIProtectionMiddleware)
 
     app.add_middleware(
         CORSMiddleware,

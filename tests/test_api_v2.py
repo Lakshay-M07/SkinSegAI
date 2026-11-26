@@ -855,3 +855,216 @@ def test_chat_validation_and_stale_revision(client):
     )
 
     assert response.status_code == 422
+
+
+# =====================================================
+# RESULT VERSIONING AND REPORT CONSISTENCY
+# =====================================================
+
+def test_repeated_segmentation_advances_revision(client):
+
+    headers, revision = create_session(client)
+
+    revision = upload(
+        client,
+        headers,
+        revision,
+    )
+
+    # First approved segmentation.
+
+    proposal = propose(
+        client,
+        headers,
+        revision,
+        ["custom_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+    )
+
+    assert response.status_code == 200
+
+    first = response.json()["context"]
+
+    first_revision = first["revision"]
+
+    assert first["analysis_completed"]
+    assert first_revision > revision
+
+    # Preparing and cancelling identical settings
+    # must not change the existing results.
+
+    proposal = propose(
+        client,
+        headers,
+        first_revision,
+        ["custom_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+        approved=False,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["context"] == first
+
+    # Repeat segmentation using identical settings.
+
+    proposal = propose(
+        client,
+        headers,
+        first_revision,
+        ["custom_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+    )
+
+    assert response.status_code == 200
+
+    second = response.json()["context"]
+
+    second_revision = second["revision"]
+
+    assert second["analysis_completed"]
+
+    assert second_revision > first_revision
+
+    assert (
+        first["configuration"]
+        == second["configuration"]
+    )
+
+    assert first["image"] == second["image"]
+
+    # Previous result requests must now be rejected.
+
+    for endpoint in (
+        "/results/custom_unet/mask",
+        "/results/custom_unet/overlay",
+        "/analysis",
+        "/report",
+    ):
+
+        response = client.get(
+            f"/api/v2{endpoint}",
+            headers=headers,
+            params={
+                "expected_revision": first_revision,
+            },
+        )
+
+        assert response.status_code == 409
+
+    # Current result requests must remain valid.
+
+    response = client.get(
+        "/api/v2/results/custom_unet/mask",
+        headers=headers,
+        params={
+            "expected_revision": second_revision,
+        },
+    )
+
+    assert response.status_code == 200
+
+    response = client.get(
+        "/api/v2/results",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    assert (
+        response.json()["revision"]
+        == second_revision
+    )
+
+
+def test_report_context_matches_api_context(client):
+
+    import json
+
+    from datetime import datetime
+    from zipfile import ZipFile
+
+    headers, revision = create_session(client)
+
+    revision = upload(
+        client,
+        headers,
+        revision,
+    )
+
+    proposal = propose(
+        client,
+        headers,
+        revision,
+        ["custom_unet", "resnet34_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+    )
+
+    assert response.status_code == 200
+
+    context = response.json()["context"]
+
+    revision = context["revision"]
+
+    response = client.get(
+        "/api/v2/report",
+        headers=headers,
+        params={
+            "expected_revision": revision,
+        },
+    )
+
+    assert response.status_code == 200
+
+    with ZipFile(BytesIO(response.content)) as archive:
+
+        assert archive.testzip() is None
+
+        exported = json.loads(
+            archive.read(
+                "assistant/session_context.json"
+            )
+        )
+
+        assert set(exported) - set(context) == {
+            "report_version",
+            "generated_at_utc",
+        }
+
+        assert exported.pop("report_version") == "1.0"
+
+        generated = datetime.fromisoformat(
+            exported.pop("generated_at_utc")
+        )
+
+        assert generated.tzinfo is not None
+
+        assert exported == context
+
+    # Report generation must not mutate session state.
+
+    after = client.get(
+        "/api/v2/context",
+        headers=headers,
+    ).json()["context"]
+
+    assert after == context
