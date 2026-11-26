@@ -69,8 +69,8 @@ CURATED_SAMPLES: tuple[str, ...] = (
 )
 
 ALGO_COLORS = {
-    "U-Net":   "#38BDF8",
-    "GrabCut": "#2DD4BF",
+    "U-Net":   "#06B6D4",
+    "GrabCut": "#F59E0B",
 }
 
 THRESHOLD_PRESETS: dict[str, float] = {
@@ -81,8 +81,8 @@ THRESHOLD_PRESETS: dict[str, float] = {
 }
 
 DISCLAIMER = (
-    "⚠️ **Research only.** SkinSegAI is not a clinical diagnostic "
-    "tool and cannot determine whether a lesion is benign or malignant."
+    "Research use only — SkinSegAI is an academic segmentation tool and "
+    "not a medical diagnostic system."
 )
 
 
@@ -177,6 +177,225 @@ def pil_to_bytes(img: Image.Image, fmt: str = "PNG") -> bytes:
     return buf.getvalue()
 
 
+def style_plotly_figure(fig):
+    """Apply transparent dark clinical-slate styling to Plotly charts."""
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#F1F5F9"),
+        margin=dict(l=24, r=16, t=32, b=24),
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#CBD5E1"),
+        ),
+    )
+    fig.update_xaxes(
+        gridcolor="rgba(255,255,255,0.06)",
+        zerolinecolor="rgba(255,255,255,0.08)",
+    )
+    fig.update_yaxes(
+        gridcolor="rgba(255,255,255,0.06)",
+        zerolinecolor="rgba(255,255,255,0.08)",
+    )
+    return fig
+
+
+def inject_custom_css():
+    """Inject clinical-imaging workstation CSS."""
+    st.markdown(
+        """
+        <style>
+            /* Hide right-side Streamlit toolbar/menu/deploy chrome while keeping sidebar reopen control clickable */
+            [data-testid="stToolbarActions"],
+            [data-testid="stAppDeployButton"],
+            [data-testid="stMainMenu"],
+            [data-testid="stDecoration"],
+            [data-testid="stStatusWidget"],
+            [data-testid="stFooter"],
+            footer,
+            #MainMenu,
+            .stDeployButton {
+                display: none !important;
+            }
+            [data-testid="stHeader"],
+            [data-testid="stToolbar"] {
+                background: transparent !important;
+                pointer-events: none !important;
+                height: 2.25rem;
+            }
+            [data-testid="stSidebarCollapsedControl"],
+            [data-testid="stSidebarCollapsedControl"] button,
+            [data-testid="stExpandSidebarButton"],
+            [data-testid="stExpandSidebarButton"] button {
+                visibility: visible !important;
+                pointer-events: auto !important;
+                opacity: 1 !important;
+            }
+            /* Tighten top page padding for widescreen above-the-fold fit */
+            .block-container {
+                padding-top: 1.0rem !important;
+                padding-bottom: 1.5rem !important;
+                max-width: 1440px;
+            }
+            /* Elevated dark metric cards */
+            [data-testid="stMetric"] {
+                background: #131A2A;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                padding: 0.85rem 1.05rem;
+            }
+            [data-testid="stMetricLabel"] {
+                color: #94A3B8;
+                font-size: 0.78rem;
+                letter-spacing: 0.03em;
+            }
+            [data-testid="stMetricValue"] {
+                font-variant-numeric: tabular-nums;
+                color: #F1F5F9;
+            }
+            [data-testid="stMetricDelta"] {
+                font-variant-numeric: tabular-nums;
+            }
+            /* Pill-style navigation tabs */
+            [data-baseweb="tab-list"] {
+                gap: 0.5rem;
+                background: #131A2A;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                padding: 0.3rem;
+            }
+            [data-baseweb="tab"] {
+                border-radius: 8px !important;
+                padding: 0.45rem 1rem !important;
+                color: #94A3B8 !important;
+                font-weight: 500;
+                border: none !important;
+            }
+            [data-baseweb="tab"][aria-selected="true"] {
+                background: rgba(6, 182, 212, 0.16) !important;
+                color: #06B6D4 !important;
+                border: 1px solid rgba(6, 182, 212, 0.35) !important;
+            }
+            [data-baseweb="tab-highlight"] {
+                display: none !important;
+            }
+            /* Top header banner */
+            .skinseg-banner {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1rem;
+                background: #131A2A;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                padding: 0.9rem 1.25rem;
+                margin-bottom: 1rem;
+            }
+            .skinseg-banner-title {
+                margin: 0;
+                font-size: 1.35rem;
+                font-weight: 700;
+                color: #F1F5F9;
+                letter-spacing: -0.01em;
+            }
+            .skinseg-banner-sub {
+                margin: 0.15rem 0 0 0;
+                font-size: 0.85rem;
+                color: #94A3B8;
+            }
+            .skinseg-badges {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+                align-items: center;
+            }
+            .skinseg-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.35rem;
+                padding: 0.28rem 0.68rem;
+                border-radius: 999px;
+                font-size: 0.76rem;
+                font-weight: 600;
+                font-variant-numeric: tabular-nums;
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                color: #CBD5E1;
+            }
+            .skinseg-badge--accent {
+                background: rgba(6, 182, 212, 0.12);
+                border-color: rgba(6, 182, 212, 0.32);
+                color: #22D3EE;
+            }
+            /* Standardized uppercase panel headers & aligned image frames */
+            .panel-card-header {
+                font-size: 0.72rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                color: #94A3B8;
+                background: #131A2A;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-bottom: none;
+                border-radius: 10px 10px 0 0;
+                padding: 0.45rem 0.75rem;
+            }
+            .panel-card-header + div[data-testid="stImage"] {
+                background: #131A2A;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 0 0 10px 10px;
+                padding: 0.5rem;
+            }
+            .panel-card-header + div[data-testid="stImage"] img {
+                height: 340px;
+                width: 100%;
+                object-fit: contain;
+                border-radius: 6px;
+            }
+            /* Subtle footer callout */
+            .skinseg-footer {
+                margin-top: 1.5rem;
+                padding: 0.7rem 1rem;
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                color: #64748B;
+                font-size: 0.78rem;
+                text-align: center;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_top_banner(settings: dict):
+    """Render the top clinical-imaging header banner with status badges."""
+    unet_model = settings.get("unet_model")
+    arch_label = getattr(unet_model, "arch", "unavailable") if unet_model else "unavailable"
+    device_obj = getattr(unet_model, "device", None) if unet_model else None
+    device_label = str(device_obj).upper() if device_obj is not None else "CPU"
+    mode_label = settings.get("dataset_mode", "Sample Gallery")
+
+    st.markdown(
+        f"""
+        <div class="skinseg-banner">
+            <div>
+                <div class="skinseg-banner-title">SkinSegAI</div>
+                <div class="skinseg-banner-sub">
+                    Clinical-Imaging Lesion Segmentation &amp; Uncertainty Workstation
+                </div>
+            </div>
+            <div class="skinseg-badges">
+                <span class="skinseg-badge skinseg-badge--accent">Model: {arch_label}</span>
+                <span class="skinseg-badge">Device: {device_label}</span>
+                <span class="skinseg-badge">Source: {mode_label}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ============================================================
 # VISUALISATION HELPERS
 # ============================================================
@@ -249,18 +468,56 @@ def discover_checkpoints() -> list[Path]:
     return sorted(ckpt_dir.glob("*.pth"))
 
 
-def checkpoint_arch_label(ckpt_path: Path) -> str:
-    """Read arch from checkpoint metadata without loading the full model."""
-    try:
-        import torch
-        meta = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
-        arch = meta.get("arch", "custom_unet")
-        ep   = meta.get("epoch", "?")
-        dice = meta.get("val_dice", None)
-        dice_str = f"  dice={dice:.4f}" if dice is not None else ""
-        return f"{ckpt_path.name}  [{arch} · ep {ep}{dice_str}]"
-    except Exception:
-        return ckpt_path.name
+@st.cache_resource
+def resolve_default_checkpoint() -> str | None:
+    """
+    Automatically pick the best trained checkpoint in artifacts/.
+    Prioritizes the latest resnet34_unet checkpoint if present,
+    falling back to custom_unet (or best_model.pth / newest .pth).
+    """
+    candidates = discover_checkpoints()
+    if not candidates:
+        artifacts_dir = ROOT / "artifacts"
+        if artifacts_dir.is_dir():
+            candidates = sorted(artifacts_dir.rglob("*.pth"))
+    if not candidates:
+        return None
+
+    import torch
+
+    resnet_ckpts: list[tuple[float, Path]] = []
+    custom_ckpts: list[tuple[float, Path]] = []
+    other_ckpts: list[tuple[float, Path]] = []
+
+    for path in candidates:
+        mtime = path.stat().st_mtime
+        try:
+            meta = torch.load(str(path), map_location="cpu", weights_only=False)
+            arch = meta.get("arch", "custom_unet") if isinstance(meta, dict) else "custom_unet"
+        except Exception:
+            arch = "custom_unet"
+
+        if arch == "resnet34_unet":
+            resnet_ckpts.append((mtime, path))
+        elif arch == "custom_unet":
+            custom_ckpts.append((mtime, path))
+        else:
+            other_ckpts.append((mtime, path))
+
+    if resnet_ckpts:
+        resnet_ckpts.sort(key=lambda item: item[0], reverse=True)
+        return str(resnet_ckpts[0][1])
+
+    best_default = ROOT / "artifacts" / "checkpoints" / "best_model.pth"
+    if best_default.is_file():
+        return str(best_default)
+
+    if custom_ckpts:
+        custom_ckpts.sort(key=lambda item: item[0], reverse=True)
+        return str(custom_ckpts[0][1])
+
+    other_ckpts.sort(key=lambda item: item[0], reverse=True)
+    return str(other_ckpts[0][1])
 
 
 # ============================================================
@@ -285,50 +542,31 @@ def _load_sample_bytes(stem: str) -> tuple[bytes | None, bytes | None]:
 def build_sidebar() -> dict:
     """
     Render the sidebar and return a settings dict consumed by the main view.
-    Keys: checkpoint_path, image_bytes, mask_bytes, source_label,
+    Keys: checkpoint_path, image_bytes, mask_bytes, source_label, dataset_mode,
           threshold, opacity, overlay_style, overlay_color,
           show_uncertainty, mc_passes, unet_model (or None).
     """
-    st.sidebar.title("🔬 SkinSegAI")
-    st.sidebar.caption("Skin Lesion Segmentation Workstation")
-    st.sidebar.markdown(DISCLAIMER)
+    st.sidebar.title("SkinSegAI")
+    st.sidebar.caption("Lesion Segmentation Controls")
     st.sidebar.divider()
 
-    # ── Checkpoint selector ──────────────────────────────────
-    st.sidebar.subheader("Model checkpoint")
-    checkpoints = discover_checkpoints()
-
-    if not checkpoints:
-        st.sidebar.error("No *.pth checkpoints found in artifacts/checkpoints/")
-        checkpoint_path = None
-        unet_model      = None
+    # ── Auto-load default model checkpoint (cached) ──────────
+    checkpoint_path = resolve_default_checkpoint()
+    unet_model = None
+    if checkpoint_path is None:
+        st.sidebar.error("No trained model checkpoint found in artifacts/.")
     else:
-        default_idx = next(
-            (i for i, p in enumerate(checkpoints) if p.name == "best_model.pth"),
-            0,
-        )
-        ckpt_labels = [checkpoint_arch_label(p) for p in checkpoints]
-        sel_idx = st.sidebar.selectbox(
-            "Select checkpoint",
-            range(len(checkpoints)),
-            index=default_idx,
-            format_func=lambda i: ckpt_labels[i],
-        )
-        checkpoint_path = str(checkpoints[sel_idx])
         try:
             unet_model, _ = load_segmentation_service(checkpoint_path)
-            st.sidebar.caption(f"Architecture: `{unet_model.arch}`")
         except Exception:
-            logger.exception("Failed to load checkpoint for sidebar inspection.")
+            logger.exception("Failed to load default checkpoint.")
             unet_model = None
 
-    st.sidebar.divider()
-
-    # ── Image source ─────────────────────────────────────────
-    st.sidebar.subheader("Image source")
+    # ── 1. Image Source ──────────────────────────────────────
+    st.sidebar.subheader("Image Source")
     source = st.sidebar.radio(
         "Source",
-        ["Custom upload", "Curated sample"],
+        ["Sample Gallery", "Custom Upload"],
         label_visibility="collapsed",
     )
 
@@ -336,7 +574,7 @@ def build_sidebar() -> dict:
     mask_bytes:  bytes | None = None
     source_label = ""
 
-    if source == "Custom upload":
+    if source == "Custom Upload":
         up_img = st.sidebar.file_uploader(
             "Upload dermoscopic image",
             type=["jpg", "jpeg", "png"],
@@ -354,12 +592,11 @@ def build_sidebar() -> dict:
             mask_bytes = up_gt.getvalue()
         st.sidebar.caption("JPEG/PNG · max 20 MB · max 12 MP")
     else:
-        # Curated gallery — only show samples whose files exist
         available = [(s, _load_sample_bytes(s)) for s in CURATED_SAMPLES]
         available = [(s, pair) for s, pair in available if pair[0] is not None]
         if not available:
             st.sidebar.warning(
-                "Curated samples not found. "
+                "Sample images not found. "
                 "Ensure data/processed_grouped/validation/images/ exists."
             )
         else:
@@ -374,10 +611,10 @@ def build_sidebar() -> dict:
 
     st.sidebar.divider()
 
-    # ── Threshold ────────────────────────────────────────────
-    st.sidebar.subheader("Threshold")
+    # ── 2. Model & Threshold Controls ────────────────────────
+    st.sidebar.subheader("Model & Threshold Controls")
     preset_choice = st.sidebar.radio(
-        "Preset",
+        "Threshold preset",
         list(THRESHOLD_PRESETS.keys()),
         index=1,  # Balanced default
     )
@@ -391,63 +628,55 @@ def build_sidebar() -> dict:
         )
     else:
         threshold = THRESHOLD_PRESETS[preset_choice]
-        st.sidebar.caption(f"Threshold locked to **{threshold}**")
+        st.sidebar.caption(f"Threshold set to **{threshold:.2f}**")
 
     st.sidebar.divider()
 
-    # ── Overlay style ────────────────────────────────────────
-    st.sidebar.subheader("Overlay style")
-    overlay_style = st.sidebar.radio(
-        "Style",
-        ["Filled Translucent Mask", "Crisp Contour Outline"],
-        label_visibility="collapsed",
-    )
-    overlay_color = st.sidebar.color_picker(
-        "Mask / outline colour", value="#38BDF8"
-    )
-    opacity = st.sidebar.slider(
-        "Opacity / alpha",
-        min_value=0.05,
-        max_value=0.95,
-        value=0.35,
-        step=0.05,
-    )
-
-    st.sidebar.divider()
-
-    # ── Uncertainty ──────────────────────────────────────────
-    st.sidebar.subheader("Uncertainty")
-    show_uncertainty = st.sidebar.toggle(
-        "Show Uncertainty Heatmap",
-        value=True,
-        help=(
-            "Display pixel-wise predictive entropy [0=certain, 1=ambiguous] "
-            "and Border Uncertainty Score."
-        ),
-    )
-    mc_passes = 1
-    if unet_model is not None and unet_model.has_dropout:
-        use_mc = st.sidebar.toggle(
-            "Enable MC Dropout",
-            value=False,
+    # ── 3. Advanced Display & Uncertainty Settings ───────────
+    with st.sidebar.expander("Advanced Display & Uncertainty Settings", expanded=False):
+        overlay_style = st.radio(
+            "Overlay style",
+            ["Filled Translucent Mask", "Crisp Contour Outline"],
+        )
+        overlay_color = st.color_picker(
+            "Mask / outline colour", value="#06B6D4"
+        )
+        opacity = st.slider(
+            "Opacity / alpha",
+            min_value=0.05,
+            max_value=0.95,
+            value=0.35,
+            step=0.05,
+        )
+        show_uncertainty = st.toggle(
+            "Show Uncertainty Heatmap",
+            value=True,
             help=(
-                "Run N stochastic forward passes with Dropout active while "
-                "keeping BatchNorm frozen."
+                "Display pixel-wise predictive entropy [0=certain, 1=ambiguous] "
+                "and Border Uncertainty Score."
             ),
         )
-        if use_mc:
-            mc_passes = st.sidebar.slider(
-                "MC Dropout passes", min_value=2, max_value=20, value=10, step=1
+        mc_passes = 1
+        if unet_model is not None and unet_model.has_dropout:
+            use_mc = st.toggle(
+                "Enable MC Dropout",
+                value=False,
+                help=(
+                    "Run N stochastic forward passes with Dropout active while "
+                    "keeping BatchNorm frozen."
+                ),
             )
-
-    st.sidebar.divider()
-    st.sidebar.caption("ISIC 2018 · PyTorch · Streamlit")
+            if use_mc:
+                mc_passes = st.slider(
+                    "MC Dropout passes", min_value=2, max_value=20, value=10, step=1
+                )
 
     return {
         "checkpoint_path": checkpoint_path,
         "image_bytes":     image_bytes,
         "mask_bytes":      mask_bytes,
         "source_label":    source_label,
+        "dataset_mode":    source,
         "threshold":       threshold,
         "opacity":         opacity,
         "overlay_style":   overlay_style,
@@ -478,11 +707,14 @@ def render_tab_visual(
 
     col_orig, col_unet, col_gc = st.columns(3)
     with col_orig:
-        st.image(image, caption="Original", use_container_width=True)
+        st.markdown('<div class="panel-card-header">ORIGINAL INPUT</div>', unsafe_allow_html=True)
+        st.image(image, use_container_width=True)
     with col_unet:
-        st.image(unet_overlay, caption="U-Net Overlay", use_container_width=True)
+        st.markdown('<div class="panel-card-header">U-NET PREDICTION</div>', unsafe_allow_html=True)
+        st.image(unet_overlay, use_container_width=True)
     with col_gc:
-        st.image(grabcut_overlay, caption="GrabCut Overlay", use_container_width=True)
+        st.markdown('<div class="panel-card-header">GRABCUT BASELINE</div>', unsafe_allow_html=True)
+        st.image(grabcut_overlay, use_container_width=True)
 
     # Store overlays for montage download
     st.session_state["_overlays"] = (unet_overlay, grabcut_overlay)
@@ -674,7 +906,7 @@ def render_tab_metrics(
             labels={"Value": "Score / Ratio"},
         )
         fig.update_layout(legend_title_text="Algorithm")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(style_plotly_figure(fig), use_container_width=True)
 
     st.divider()
 
@@ -733,12 +965,6 @@ def render_tab_metrics(
 # ============================================================
 
 def _workstation_page(settings: dict):
-    st.title("Visual Analysis Workstation")
-    st.caption(
-        "Single-pass U-Net · GrabCut baseline · Pixel-wise uncertainty · "
-        "Morphology metrics · Error analysis"
-    )
-
     image_bytes = settings["image_bytes"]
     if image_bytes is None:
         st.info("👈  Select an image source in the sidebar to begin.")
@@ -922,7 +1148,7 @@ def _training_page():
             history, x="epoch", y=ycols, markers=True,
             labels={"epoch": "Epoch", "value": "Value", "variable": "Metric"},
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(style_plotly_figure(fig), use_container_width=True)
 
     with st.expander("Complete training history"):
         st.dataframe(history.round(6), hide_index=True)
@@ -979,7 +1205,7 @@ def _comparison_page():
         labels={"metric": "Metric", "score": "Score"},
     )
     fig.update_yaxes(range=[0, 1.05])
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(style_plotly_figure(fig), use_container_width=True)
 
     # ── Distribution (per-image) ──────────────────────────────
     if results is not None and {"algorithm", "dice", "iou"}.issubset(results.columns):
@@ -991,14 +1217,14 @@ def _comparison_page():
             points="outliers",
         )
         box.update_yaxes(range=[0, 1.05])
-        st.plotly_chart(box, use_container_width=True)
+        st.plotly_chart(style_plotly_figure(box), use_container_width=True)
 
         hist = px.histogram(
             results, x=sel, color="algorithm",
             barmode="overlay", opacity=0.65, nbins=30,
             color_discrete_map=ALGO_COLORS,
         )
-        st.plotly_chart(hist, use_container_width=True)
+        st.plotly_chart(style_plotly_figure(hist), use_container_width=True)
 
     # ── Inference time ────────────────────────────────────────
     st.subheader("Inference time")
@@ -1008,7 +1234,7 @@ def _comparison_page():
         text_auto=".2f",
         labels={"inference_ms": "Mean inference (ms)"},
     )
-    st.plotly_chart(t_fig, use_container_width=True)
+    st.plotly_chart(style_plotly_figure(t_fig), use_container_width=True)
 
     # ── Downloads ─────────────────────────────────────────────
     c1, c2 = st.columns(2)
@@ -1091,7 +1317,9 @@ def main():
         initial_sidebar_state="expanded",
     )
 
+    inject_custom_css()
     settings = build_sidebar()
+    render_top_banner(settings)
 
     # Secondary navigation at the bottom of the sidebar
     st.sidebar.divider()
@@ -1109,6 +1337,11 @@ def main():
         _training_page()
     else:
         _about_page()
+
+    st.markdown(
+        f'<div class="skinseg-footer">{DISCLAIMER}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
