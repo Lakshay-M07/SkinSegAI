@@ -151,22 +151,22 @@ function HorizontalRatioBars({ rows }) {
             <div className="flex items-center justify-between text-xs">
               <span className="text-[#94A3B8]">{row.label}</span>
               <span className="font-mono-num text-[11px] text-[#CFD8E3]">
-                <span className="text-[#22D3EE]">{row.format(row.unet)}</span>
+                <span className="text-[#22D3EE]">{Number.isFinite(row.unet) ? row.format(row.unet) : 'N/A'}</span>
                 {' · '}
-                <span className="text-[#FB923C]">{row.format(row.grabcut)}</span>
+                <span className="text-[#FB923C]">{Number.isFinite(row.grabcut) ? row.format(row.grabcut) : 'N/A'}</span>
               </span>
             </div>
             <div className="space-y-1">
               <div className="h-2 rounded-full bg-[#0A1426] overflow-hidden">
                 <div
                   className="h-full rounded-full bg-[#22D3EE] transition-all duration-300"
-                  style={{ width: `${Math.max(2, uPct)}%` }}
+                  style={{ width: `${Number.isFinite(row.unet) && row.unet !== 0 ? Math.max(2, uPct) : 0}%` }}
                 />
               </div>
               <div className="h-2 rounded-full bg-[#0A1426] overflow-hidden">
                 <div
                   className="h-full rounded-full bg-[#FB923C] transition-all duration-300"
-                  style={{ width: `${Math.max(2, gPct)}%` }}
+                  style={{ width: `${Number.isFinite(row.grabcut) && row.grabcut !== 0 ? Math.max(2, gPct) : 0}%` }}
                 />
               </div>
             </div>
@@ -433,14 +433,14 @@ export function ComparisonView({
                   },
                   {
                     label: 'Circularity / Compactness',
-                    unet: unetMorph.circularity ?? 0,
-                    grabcut: grabcutMorph.circularity ?? 0,
+                    unet: unetMorph.circularity,
+                    grabcut: grabcutMorph.circularity,
                     format: (v) => v.toFixed(4),
                   },
                   {
                     label: 'Asymmetry Index',
-                    unet: unetMorph.asymmetry ?? 0,
-                    grabcut: grabcutMorph.asymmetry ?? 0,
+                    unet: unetMorph.asymmetry,
+                    grabcut: grabcutMorph.asymmetry,
                     format: (v) => v.toFixed(4),
                   },
                 ]}

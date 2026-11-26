@@ -1119,6 +1119,22 @@ def _training_page():
         st.error("Training history is incomplete.")
         return
 
+    history = history.copy()
+    numeric_columns = required | {
+        "train_loss", "val_loss", "train_dice", "train_iou",
+        "train_precision", "val_precision", "train_recall",
+        "val_recall", "learning_rate",
+    }
+    for column in numeric_columns.intersection(history.columns):
+        history[column] = pd.to_numeric(history[column], errors="coerce")
+    values = history[list(required)].to_numpy(dtype=float)
+    if (not np.isfinite(values).all()
+            or not history["epoch"].ge(1).all()
+            or not history["epoch"].mod(1).eq(0).all()
+            or not history["val_dice"].between(0, 1).all()
+            or not history["val_iou"].between(0, 1).all()):
+        st.error("Training history contains invalid epoch or validation values.")
+        return
     if history["val_dice"].dropna().empty:
         st.error("No valid validation Dice scores found.")
         return

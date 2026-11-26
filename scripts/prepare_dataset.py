@@ -29,7 +29,7 @@ def main():
 
 
     splitter = DatasetSplitter(
-    metadata_path=root / "data/raw/metadata.csv",
+    metadata_path=metadata_path,
     random_seed=42
 )
 

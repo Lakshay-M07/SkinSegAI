@@ -16,7 +16,7 @@ from src.models.model_factory import (
 def test_forward_pass_output_shape(arch):
     """Each architecture must produce (B, 1, 256, 256) logits."""
 
-    model = build_model(arch)
+    model = build_model(arch, pretrained=False)
     model.eval()
 
     batch = torch.randn(2, 3, 256, 256)

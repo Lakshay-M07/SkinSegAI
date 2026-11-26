@@ -190,7 +190,7 @@ export function WorkstationView({
         <BentoCard
           title="Live Inference Controls"
           subtitle="Prepare settings, then approve segmentation"
-          badge={segmentLoading ? 'Running inference…' : 'Ready'}
+          badge={segmentLoading ? 'Processing request…' : 'Ready'}
           badgeTone={segmentLoading ? 'coral' : 'aqua'}
           className="lg:col-span-7"
         >
@@ -208,6 +208,7 @@ export function WorkstationView({
               </div>
               <input
                 type="range"
+                aria-label="Probability threshold"
                 min="0.10"
                 max="0.90"
                 step="0.01"
@@ -273,6 +274,7 @@ export function WorkstationView({
                   </div>
                   <input
                     type="range"
+                    aria-label="Overlay opacity"
                     min="0.00"
                     max="1.00"
                     step="0.05"

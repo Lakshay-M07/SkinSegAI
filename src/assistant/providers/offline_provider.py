@@ -92,6 +92,58 @@ class OfflineProvider(BaseProvider):
 
         return f"{value:.{digits}f}"
 
+    @staticmethod
+    def _configuration_from_messages(messages):
+        """Read trusted active/pending state supplied by the agent."""
+        for message in messages:
+            if message.get("role") != "system":
+                continue
+            content = message.get("content", "")
+            for marker in ("CURRENT PENDING PROPOSAL:", "Current application state:"):
+                if marker in content:
+                    try:
+                        obj, _ = json.JSONDecoder().raw_decode(
+                            content.split(marker, 1)[1].lstrip()
+                        )
+                        if isinstance(obj.get("configuration"), dict):
+                            return obj["configuration"]
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+        return {}
+
+    def _supported_request(self, content, normalized, messages):
+        text = content.casefold().strip().rstrip(".!?").strip()
+        if re.match(r"^(?:please )?(?:do not|don't|never|cancel|stop|avoid)\b", text):
+            return None, {}, "No segmentation or configuration change was executed. Use Cancel to dismiss any pending proposal."
+        threshold = re.fullmatch(
+            r"(?:please )?(?:change|set|adjust) (?:the )?threshold to (0?\.\d+|[01](?:\.\d+)?)", text
+        )
+        if threshold:
+            value = float(threshold.group(1))
+            if not 0.1 <= value <= 0.9:
+                return None, {}, "Threshold must be between 0.1 and 0.9. No change was applied."
+            return "propose_configuration", {"threshold": value}, None
+        if text in ("enable uncertainty analysis", "disable uncertainty analysis"):
+            return "propose_configuration", {"include_uncertainty": text.startswith("enable")}, None
+        if text in ("remove grabcut", "retain my existing settings but remove grabcut"):
+            config = self._configuration_from_messages(messages)
+            models = config.get("models", [])
+            if not models or not any(m != "grabcut" for m in models):
+                return None, {}, "Select at least one remaining model before removing GrabCut."
+            return "propose_configuration", {"models": [m for m in models if m != "grabcut"]}, None
+        aliases = {
+            "which model should i use for the highest benchmark dice score": "get_available_models",
+            "compare the dice iou precision and recall of my current results": "get_session_context",
+            "explain the uncertainty around my lesion boundaries": "analyze_uncertainty",
+            "how would reducing the threshold affect the predicted lesion area": "analyze_thresholds",
+            "compare circularity asymmetry and lesion area": "get_session_context",
+            "assess the quality of my uploaded image": "inspect_image_quality",
+            "where do the models disagree": "analyze_disagreement",
+            "compare the dice iou precision and recall of all three models": "get_session_context",
+            "which model performed best on my current image and why": "get_session_context",
+        }
+        return aliases.get(normalized), {}, None
+
     def chat(self, messages, *, tools=()):
 
         if not isinstance(messages, (list, tuple)):
@@ -141,6 +193,13 @@ class OfflineProvider(BaseProvider):
             )
 
         tool_name = self.COMMANDS.get(command)
+        arguments = {}
+        if tool_name is None:
+            tool_name, arguments, reply = self._supported_request(
+                content, normalized, messages
+            )
+            if reply is not None:
+                return ProviderResponse(content=reply)
 
         if tool_name is None:
 
@@ -165,7 +224,7 @@ class OfflineProvider(BaseProvider):
             tool_calls=(
                 ToolCall(
                     name=tool_name,
-                    arguments={},
+                    arguments=arguments,
                 ),
             )
         )
@@ -324,6 +383,14 @@ class OfflineProvider(BaseProvider):
                 f"- Predicted lesion area: "
                 f"{entry['predicted_lesion_area_percent']:.2f}%"
             )
+
+            measurements = entry.get("measurements") or {}
+            if measurements:
+                for key, label in (("area_pixels", "Area (pixels)"),
+                                   ("perimeter_pixels", "Perimeter (pixels)"),
+                                   ("circularity", "Circularity"),
+                                   ("asymmetry", "Asymmetry")):
+                    lines.append(f"- {label}: {self._number(measurements.get(key))}")
 
             lines.append(
                 f"- Mask status: {entry['mask_status']}"
