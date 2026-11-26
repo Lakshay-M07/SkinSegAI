@@ -13,11 +13,14 @@ from src.data.image_preprocessor import ImagePreprocessor
 
 class LesionDataset(Dataset):
 
-    def __init__(self, csv_path, project_root, augment=False):
+    def __init__(self, csv_path, project_root, augment=False,
+                 mean=None, std=None):
 
         self._root = Path(project_root)
         self._augment = augment
-        self._preprocessor = ImagePreprocessor()
+        self._preprocessor = ImagePreprocessor(
+            mean=mean, std=std
+        )
 
         with open(csv_path, newline="") as file:
             self._records = list(csv.DictReader(file))

@@ -1,6 +1,12 @@
 
 import csv
+import sys
 from pathlib import Path
+
+# Ensure project root is in sys.path when script is executed directly
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import torch
 from PIL import Image
@@ -107,9 +113,11 @@ def main():
     # Verify dataset integrity and group separation.
     verify_splits(root)
 
-    # Select Apple GPU when available.
+    # Select GPU (CUDA / Apple MPS) when available.
     device = (
-        "mps"
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
         if torch.backends.mps.is_available()
         else "cpu"
     )

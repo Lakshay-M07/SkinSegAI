@@ -201,3 +201,60 @@ class LesionAnalyzer:
         )
 
         return Image.fromarray(output)
+
+    def compute_border_uncertainty(
+        self,
+        mask,
+        uncertainty_map,
+        kernel_size=9
+    ):
+        """Compute mean uncertainty within a dilated ring around the mask boundary."""
+        mask = self._validate_mask(mask)
+
+        if uncertainty_map.shape != mask.shape:
+            raise ValueError("Uncertainty map size mismatch.")
+
+        mask_u8 = mask.astype(np.uint8)
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (kernel_size, kernel_size)
+        )
+        dilated = cv2.dilate(mask_u8, kernel, iterations=1)
+        eroded = cv2.erode(mask_u8, kernel, iterations=1)
+        ring = (dilated > 0) & (eroded == 0)
+
+        if np.any(ring):
+            return float(np.mean(uncertainty_map[ring]))
+
+        return float(np.mean(uncertainty_map))
+
+    def create_uncertainty_heatmap(
+        self,
+        image,
+        uncertainty_map,
+        alpha=0.55,
+        colormap=cv2.COLORMAP_INFERNO
+    ):
+        """Return (standalone_heatmap_pil, overlaid_heatmap_pil) using inferno colormap."""
+        if not 0 <= alpha <= 1:
+            raise ValueError("Invalid transparency.")
+
+        original = np.array(
+            image.convert("RGB"),
+            dtype=np.uint8
+        )
+
+        if original.shape[:2] != uncertainty_map.shape:
+            raise ValueError("Uncertainty map size mismatch.")
+
+        norm = np.clip(uncertainty_map, 0.0, 1.0)
+        heat_u8 = np.round(norm * 255.0).astype(np.uint8)
+        heat_bgr = cv2.applyColorMap(heat_u8, colormap)
+        heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB)
+
+        blended = (
+            (1.0 - alpha) * original.astype(np.float32)
+            + alpha * heat_rgb.astype(np.float32)
+        ).clip(0, 255).astype(np.uint8)
+
+        return Image.fromarray(heat_rgb), Image.fromarray(blended)

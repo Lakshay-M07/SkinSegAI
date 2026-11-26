@@ -44,7 +44,8 @@ class SegmentationService:
         image,
         algorithm,
         alpha=0.35,
-        ground_truth=None
+        ground_truth=None,
+        mc_passes=1
     ):
 
         if not isinstance(image, Image.Image):
@@ -80,7 +81,19 @@ class SegmentationService:
 
         start = time.perf_counter()
 
-        mask = segmenter.segment(image)
+        prob_map = None
+        uncertainty_map = None
+
+        if hasattr(segmenter, "predict_with_uncertainty"):
+            prediction = segmenter.predict_with_uncertainty(
+                image,
+                mc_passes=mc_passes
+            )
+            mask = prediction["binary_mask"]
+            prob_map = prediction["prob_map"]
+            uncertainty_map = prediction["uncertainty_map"]
+        else:
+            mask = segmenter.segment(image)
 
         inference_ms = (
             time.perf_counter() - start
@@ -122,6 +135,15 @@ class SegmentationService:
                 target_tensor
             )
 
+        border_uncertainty = (
+            self._analyzer.compute_border_uncertainty(
+                mask,
+                uncertainty_map
+            )
+            if uncertainty_map is not None
+            else None
+        )
+
         return SegmentationResult(
             algorithm=algorithm,
             mask=mask,
@@ -129,14 +151,18 @@ class SegmentationService:
             boundary=boundary,
             measurements=measurements,
             inference_ms=inference_ms,
-            metrics=metrics
+            metrics=metrics,
+            prob_map=prob_map,
+            uncertainty_map=uncertainty_map,
+            border_uncertainty=border_uncertainty
         )
 
     def compare(
         self,
         image,
         alpha=0.35,
-        ground_truth=None
+        ground_truth=None,
+        mc_passes=1
     ):
 
         return [
@@ -144,7 +170,8 @@ class SegmentationService:
                 image,
                 algorithm,
                 alpha=alpha,
-                ground_truth=ground_truth
+                ground_truth=ground_truth,
+                mc_passes=mc_passes
             )
             for algorithm in self.available_algorithms
         ]

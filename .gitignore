@@ -20,6 +20,8 @@ dist/
 data/raw/
 data/processed/
 data/processed_grouped/
+data/ISIC2018_*/
+data/*.csv
 *.zip
 
 # Temporary files and generated exports

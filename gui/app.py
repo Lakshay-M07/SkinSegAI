@@ -39,6 +39,15 @@ from src.analysis.lesion_analyzer import LesionAnalyzer
 logger = logging.getLogger(__name__)
 
 
+@st.cache_resource
+def load_segmentation_service(checkpoint_path: str):
+    """Load and cache the segmentation service and U-Net model."""
+    unet = UNetSegmenter(checkpoint_path)
+    grabcut = GrabCutSegmenter()
+    service = SegmentationService([unet, grabcut])
+    return unet, service
+
+
 # ============================================================
 # MAIN APPLICATION CLASS
 # ============================================================
@@ -77,38 +86,20 @@ class SkinSegApp:
             "GrabCut": "#2DD4BF"
         }
 
+        self._show_uncertainty = True
+        self._mc_passes = 1
+
     # ========================================================
     # BACKEND SERVICE
     # ========================================================
 
     def _get_service(self, threshold):
 
-        if "segmentation_service" not in st.session_state:
-
-            unet = UNetSegmenter(
-                self._checkpoint,
-                threshold=threshold
-            )
-
-            grabcut = GrabCutSegmenter()
-
-            service = SegmentationService(
-                [unet, grabcut]
-            )
-
-            st.session_state["unet_segmenter"] = unet
-
-            st.session_state[
-                "segmentation_service"
-            ] = service
-
-        st.session_state[
-            "unet_segmenter"
-        ].threshold = threshold
-
-        return st.session_state[
-            "segmentation_service"
-        ]
+        unet, service = load_segmentation_service(
+            str(self._checkpoint)
+        )
+        unet.threshold = threshold
+        return service
 
     # ========================================================
     # CSV LOADING
@@ -427,11 +418,20 @@ class SkinSegApp:
             overlay=updated_overlay
         )
 
-        tabs = st.tabs([
+        tab_labels = [
             "Overlay",
             "Binary Mask",
             "Boundary"
-        ])
+        ]
+
+        show_uncertainty = (
+            self._show_uncertainty
+            and result.uncertainty_map is not None
+        )
+        if show_uncertainty:
+            tab_labels.append("Uncertainty")
+
+        tabs = st.tabs(tab_labels)
 
         with tabs[0]:
 
@@ -454,9 +454,44 @@ class SkinSegApp:
                 caption="Detected lesion boundary"
             )
 
+        if show_uncertainty:
+            with tabs[3]:
+                heatmap, heat_overlay = (
+                    self._analyzer.create_uncertainty_heatmap(
+                        original,
+                        result.uncertainty_map,
+                        alpha=max(0.25, opacity),
+                    )
+                )
+                u_left, u_right = st.columns(2)
+                u_left.image(
+                    heat_overlay,
+                    caption="Uncertainty overlay (inferno)"
+                )
+                u_right.image(
+                    heatmap,
+                    caption="Predictive entropy map [0.0 = certain, 1.0 = ambiguous]"
+                )
+                if result.border_uncertainty is not None:
+                    st.metric(
+                        "Border Uncertainty Score",
+                        f"{result.border_uncertainty:.4f}",
+                        help=(
+                            "Mean predictive entropy within a dilated "
+                            "ring around the predicted lesion boundary."
+                        ),
+                    )
+
         measurements = result.measurements
 
-        left, right = st.columns(2)
+        if show_uncertainty and result.border_uncertainty is not None:
+            left, mid, right = st.columns(3)
+            mid.metric(
+                "Border uncertainty",
+                f"{result.border_uncertainty:.4f}"
+            )
+        else:
+            left, right = st.columns(2)
 
         left.metric(
             "Lesion coverage",
@@ -886,7 +921,11 @@ class SkinSegApp:
 
             threshold
             if algorithm != "GrabCut"
-            else None
+            else None,
+
+            self._mc_passes
+            if algorithm != "GrabCut"
+            else 1
         )
 
         # ----------------------------------------------------
@@ -920,7 +959,8 @@ class SkinSegApp:
                         results = service.compare(
                             image,
                             alpha=opacity,
-                            ground_truth=ground_truth
+                            ground_truth=ground_truth,
+                            mc_passes=self._mc_passes
                         )
 
                     else:
@@ -931,7 +971,8 @@ class SkinSegApp:
                                 image,
                                 algorithm,
                                 alpha=opacity,
-                                ground_truth=ground_truth
+                                ground_truth=ground_truth,
+                                mc_passes=self._mc_passes
                             )
                         ]
 
@@ -1656,6 +1697,46 @@ class SkinSegApp:
 
             list(pages.keys())
         )
+
+        st.sidebar.divider()
+
+        self._show_uncertainty = st.sidebar.toggle(
+            "Show Uncertainty Heatmap",
+            value=True,
+            help=(
+                "Display pixel-wise predictive entropy [0, 1] "
+                "and Border Uncertainty Score for U-Net predictions."
+            )
+        )
+
+        self._mc_passes = 1
+        if self._checkpoint.is_file():
+            try:
+                unet_model, _ = load_segmentation_service(
+                    str(self._checkpoint)
+                )
+                st.sidebar.caption(
+                    f"Loaded arch: `{unet_model.arch}`"
+                )
+                if unet_model.has_dropout:
+                    use_mc = st.sidebar.toggle(
+                        "Enable MC Dropout",
+                        value=False,
+                        help=(
+                            "Run multiple stochastic forward passes "
+                            "with Dropout active while keeping BatchNorm frozen."
+                        )
+                    )
+                    if use_mc:
+                        self._mc_passes = st.sidebar.slider(
+                            "MC Dropout passes",
+                            min_value=2,
+                            max_value=20,
+                            value=10,
+                            step=1
+                        )
+            except Exception:
+                logger.exception("Unable to inspect checkpoint metadata.")
 
         st.sidebar.divider()
 
