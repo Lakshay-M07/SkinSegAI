@@ -15,7 +15,7 @@ const SECTION_LINKS = [
 const KEY_FEATURES = [
   {
     lead: 'Multi-Backbone U-Net',
-    desc: 'Supports resnet34_unet, efficientnet_b2_unet, and custom_unet with checkpoint auto-detection.',
+    desc: 'Verified Custom U-Net and ResNet-34 U-Net, with GrabCut as an optional baseline.',
   },
   {
     lead: 'Composite Edge Loss',
@@ -35,7 +35,7 @@ const KEY_FEATURES = [
   },
   {
     lead: 'Interactive Export',
-    desc: 'Provides live threshold/opacity inspection with one-click JSON, CSV, and PNG downloads.',
+    desc: 'Provides approved threshold/opacity settings, local AI guidance and JSON, CSV, PNG and ZIP downloads.',
   },
 ]
 
@@ -75,9 +75,9 @@ const KEY_FINDINGS = [
 const WORKFLOW_STEPS = [
   { step: '01', title: 'Input Image', sub: 'Sample or upload' },
   { step: '02', title: 'Preprocessing', sub: '256×256 normalize' },
-  { step: '03', title: 'U-Net & GrabCut Inference', sub: 'Parallel masks' },
+  { step: '03', title: 'Approved Segmentation', sub: 'Selected model masks' },
   { step: '04', title: 'Uncertainty & Morphology', sub: 'H(p) + shape' },
-  { step: '05', title: 'Interactive Report', sub: 'JSON / CSV / PNG' },
+  { step: '05', title: 'Interactive Report', sub: 'JSON / CSV / PNG / ZIP' },
 ]
 
 const LIMITATIONS = [

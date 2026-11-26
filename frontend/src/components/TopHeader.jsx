@@ -8,7 +8,7 @@ const TABS = [
 ]
 
 export function TopHeader({ activeTab, onTabChange, health, healthLoading }) {
-  const isReady = health?.status === 'ok' && health?.checkpoint_loaded
+  const isReady = health?.status === 'ok'
   const archLabel = health?.arch || 'Offline'
   const deviceLabel = health?.device ? health.device.toUpperCase() : '—'
 

@@ -2,6 +2,12 @@
 """Central orchestration for SkinSeg Assistant."""
 
 import json
+import re
+
+from src.assistant.providers.base_provider import (
+    ProviderResponse,
+    ToolCall as RoutedToolCall,
+)
 
 from src.assistant.analysis.response_composer import (
     GroundedResponseComposer,
@@ -530,6 +536,102 @@ Rules:
 
         return "\n".join(lines), proposal
 
+    @staticmethod
+    def _execution_intent(message):
+        """Recognize explicit segmentation execution requests."""
+
+        text = message.casefold().strip()
+        tokens = re.findall("[a-z0-9]+", text)
+
+        if not tokens:
+            return False, None
+
+        words = set(tokens)
+
+        if words.intersection({
+            "not", "never", "cancel", "stop", "avoid"
+        }) or "don't" in text:
+            return False, None
+
+        remaining = tokens.copy()
+
+        while remaining:
+
+            if remaining[0] == "please":
+                remaining = remaining[1:]
+
+            elif (
+                len(remaining) >= 2
+                and remaining[0] in {
+                    "can", "could", "would", "will"
+                }
+                and remaining[1] == "you"
+            ):
+                remaining = remaining[2:]
+
+            else:
+                break
+
+        if not remaining:
+            return False, None
+
+        if remaining[0] not in {
+            "run", "perform", "execute",
+            "start", "do", "segment"
+        }:
+            return False, None
+
+        if not words.intersection({
+            "segment", "segmentation"
+        }):
+            return False, None
+
+        simple_words = {
+            "please", "can", "could", "would", "will",
+            "you", "run", "perform", "execute", "start",
+            "do", "segment", "segmentation", "on", "the",
+            "current", "skin", "lesion", "image", "and",
+            "compare", "all", "3", "three", "models",
+            "algorithms", "after", "using", "with",
+            "then", "now", "this", "my", "uploaded",
+            "selected", "results", "of", "for", "me",
+            "them",
+        }
+
+        if not words.issubset(simple_words):
+            return True, None
+
+        normalized = " " + " ".join(tokens) + " "
+
+        all_models = (
+            " all models ",
+            " all 3 models ",
+            " all three models ",
+            " all algorithms ",
+            " all 3 algorithms ",
+            " all three algorithms ",
+        )
+
+        if any(
+            phrase in normalized
+            for phrase in all_models
+        ):
+            return True, {
+                "models": [
+                    "custom_unet",
+                    "resnet34_unet",
+                    "grabcut",
+                ]
+            }
+
+        if words.intersection({
+            "models", "algorithms", "compare"
+        }):
+            return True, None
+
+        return True, {}
+
+
     def ask(self, message):
         """Process a user message using validated assistant tools."""
 
@@ -648,6 +750,31 @@ Rules:
                 )
             )
 
+            execution_requested, direct_arguments = (
+                self._execution_intent(message)
+            )
+
+            if execution_requested:
+
+                # Execution requests must prepare a proposal,
+                # not retrieve unrelated benchmark information.
+                schemas = [
+                    schema for schema in schemas
+                    if schema["function"]["name"]
+                    == "propose_configuration"
+                ]
+
+                routing_messages[0]["content"] += (
+                    "\\n\\nEXECUTION INTENT PRIORITY:\\n"
+                    "The user explicitly requests segmentation. "
+                    "Prepare the requested configuration using "
+                    "propose_configuration. Preserve settings "
+                    "the user did not request to change. "
+                    "Comparison after segmentation is not a "
+                    "request for historical benchmarks. "
+                    "Never execute without explicit approval."
+                )
+
             budget = ExecutionBudget()
 
             provider = self._provider
@@ -658,12 +785,28 @@ Rules:
 
             try:
 
-                response = self._request_provider(
-                    provider,
-                    routing_messages,
-                    schemas,
-                    budget,
-                )
+                if direct_arguments is not None:
+
+                    response = self._response_validator.validate(
+                        ProviderResponse(
+                            tool_calls=(
+                                RoutedToolCall(
+                                    "propose_configuration",
+                                    direct_arguments,
+                                ),
+                            ),
+                        ),
+                        schemas=schemas,
+                    )
+
+                else:
+
+                    response = self._request_provider(
+                        provider,
+                        routing_messages,
+                        schemas,
+                        budget,
+                    )
 
                 # Until unrestricted LLM prose has a stronger
                 # grounding mechanism, use deterministic replies
@@ -805,7 +948,24 @@ Rules:
 
             if not calls:
 
-                answer = response.content
+                if execution_requested:
+
+                    if not self._session.has_image:
+                        answer = (
+                            "Please upload or select an image "
+                            "before running segmentation."
+                        )
+                    else:
+                        answer = (
+                            "I could not prepare the requested "
+                            "configuration. Please specify the "
+                            "models and settings, or use the "
+                            "Prepare segmentation button. "
+                            "No segmentation has been executed."
+                        )
+
+                else:
+                    answer = response.content
 
             elif any(
                 call.name == "propose_configuration"
@@ -939,6 +1099,12 @@ Rules:
                 "provider": provider.name,
 
                 "used_fallback": used_fallback,
+
+                "routing": (
+                    "deterministic"
+                    if direct_arguments is not None
+                    else "provider"
+                ),
 
                 "stage": self._workflow.stage,
 

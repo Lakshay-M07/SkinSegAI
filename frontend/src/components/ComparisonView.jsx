@@ -181,7 +181,7 @@ export function ComparisonView({
   benchmark,
   benchmarkLoading,
   segmentResult,
-  sourceLabel,
+  sourceLabel, primaryName, secondaryName, primaryId, secondaryId,
 }) {
   if (benchmarkLoading) {
     return (
@@ -200,8 +200,8 @@ export function ComparisonView({
   }
 
   const summary = benchmark?.summary || []
-  const unetBench = summary.find((r) => r.algorithm === 'U-Net') || null
-  const grabcutBench = summary.find((r) => r.algorithm === 'GrabCut') || null
+  const unetBench = summary.find((r) => r.model_id === primaryId) || null
+  const grabcutBench = summary.find((r) => r.model_id === secondaryId) || null
 
   const unetMorph = segmentResult?.unet?.measurements
   const grabcutMorph = segmentResult?.grabcut?.measurements
@@ -218,17 +218,7 @@ export function ComparisonView({
             threshold: segmentResult.threshold,
             overlay_style: segmentResult.overlay_style,
             opacity: segmentResult.opacity,
-            unet: {
-              inference_ms: segmentResult.unet.inference_ms,
-              border_uncertainty: segmentResult.unet.border_uncertainty,
-              measurements: segmentResult.unet.measurements,
-              metrics: segmentResult.unet.metrics,
-            },
-            grabcut: {
-              inference_ms: segmentResult.grabcut.inference_ms,
-              measurements: segmentResult.grabcut.measurements,
-              metrics: segmentResult.grabcut.metrics,
-            },
+            results: segmentResult.results.map(({views, ...r}) => r),
           }
         : null,
     }
@@ -276,8 +266,7 @@ export function ComparisonView({
     }
 
     if (segmentResult) {
-      for (const algoKey of ['unet', 'grabcut']) {
-        const item = segmentResult[algoKey]
+      for (const item of segmentResult.results) {
         const m = item.measurements || {}
         const met = item.metrics || {}
         rows.push([
@@ -298,38 +287,14 @@ export function ComparisonView({
       }
     }
 
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
+    const cell = value => '"' + String(value ?? '').replaceAll('"','""').replace(/^[=+@-]/, m => "'" + m) + '"'
+    const csv = [headers.join(','), ...rows.map(r => r.map(cell).join(','))].join('\n')
     triggerBlobDownload(csv, 'SkinSegAI_metrics.csv', 'text/csv;charset=utf-8;')
   }
 
-  const imageDownloads = segmentResult
-    ? [
-        {
-          label: 'U-Net Overlay PNG',
-          b64: segmentResult.unet.overlay_base64,
-          filename: 'unet_overlay.png',
-        },
-        {
-          label: 'U-Net Mask PNG',
-          b64: segmentResult.unet.mask_base64,
-          filename: 'unet_mask.png',
-        },
-        {
-          label: 'GrabCut Overlay PNG',
-          b64: segmentResult.grabcut.overlay_base64,
-          filename: 'grabcut_overlay.png',
-        },
-        ...(segmentResult.uncertainty_heatmap_base64
-          ? [
-              {
-                label: 'Uncertainty Heatmap PNG',
-                b64: segmentResult.uncertainty_heatmap_base64,
-                filename: 'uncertainty_heatmap.png',
-              },
-            ]
-          : []),
-      ]
-    : []
+  const imageDownloads = (segmentResult?.results || []).flatMap(r =>
+    Object.entries(r.views).map(([view,b64]) => ({label:`${r.algorithm} ${view} PNG`, b64, filename:`${r.model_id}_${view}.png`}))
+  )
 
   return (
     <div className="space-y-4">
@@ -345,10 +310,10 @@ export function ComparisonView({
             ) : null}
           </span>
           <span className="inline-flex items-center gap-1.5 text-[#22D3EE]">
-            <span className="h-2.5 w-2.5 rounded-sm bg-[#22D3EE]" /> U-Net
+            <span className="h-2.5 w-2.5 rounded-sm bg-[#22D3EE]" /> {primaryName}
           </span>
           <span className="inline-flex items-center gap-1.5 text-[#FB923C]">
-            <span className="h-2.5 w-2.5 rounded-sm bg-[#FB923C]" /> GrabCut
+            <span className="h-2.5 w-2.5 rounded-sm bg-[#FB923C]" /> {secondaryName}
           </span>
         </div>
 
@@ -375,14 +340,10 @@ export function ComparisonView({
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {METRIC_ROWS.map((metric) => {
-          const uVal = unetBench?.[metric.key] ?? 0
-          const gVal = grabcutBench?.[metric.key] ?? 0
+          const uVal = unetBench?.[metric.key] ?? null
+          const gVal = grabcutBench?.[metric.key] ?? null
           const delta = uVal - gVal
-          const deltaText = metric.lowerIsBetter
-            ? gVal > 0 && uVal > 0
-              ? `${(gVal / uVal).toFixed(1)}× faster`
-              : '—'
-            : `${delta >= 0 ? '+' : ''}${delta.toFixed(4)} vs GrabCut`
+          const deltaText = metric.lowerIsBetter ? 'Hardware-dependent' : uVal == null || gVal == null ? 'Unavailable' : `${delta >= 0 ? '+' : ''}${delta.toFixed(4)} vs ${secondaryName}`
 
           return (
             <BentoCard
@@ -393,15 +354,15 @@ export function ComparisonView({
             >
               <div className="space-y-2 pt-1">
                 <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] text-[#94A3B8]">U-Net</span>
+                  <span className="text-[11px] text-[#94A3B8]">{primaryName}</span>
                   <span className="text-xl font-semibold font-mono-num text-[#22D3EE]">
-                    {metric.format(uVal)}
+                    {uVal == null ? "—" : metric.format(uVal)}
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between border-t border-[#475569]/50 pt-2">
-                  <span className="text-[11px] text-[#94A3B8]">GrabCut</span>
+                  <span className="text-[11px] text-[#94A3B8]">{secondaryName}</span>
                   <span className="text-sm font-medium font-mono-num text-[#FB923C]">
-                    {metric.format(gVal)}
+                    {gVal == null ? "—" : metric.format(gVal)}
                   </span>
                 </div>
               </div>
@@ -414,19 +375,19 @@ export function ComparisonView({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <BentoCard
           title="Overlap & Latency Comparison"
-          subtitle="Benchmark summary from artifacts/metrics/comparison_summary.csv"
-          badge={benchmark?.available ? 'Live CSV' : 'Fallback'}
+          subtitle="Architecture-specific benchmark artifacts; latency depends on hardware"
+          badge={benchmark?.available ? 'Live CSV' : 'Unavailable'}
           badgeTone={benchmark?.available ? 'aqua' : 'neutral'}
           className="lg:col-span-7"
         >
-          <GroupedOverlapChart unet={unetBench} grabcut={grabcutBench} />
+          {unetBench && grabcutBench ? <GroupedOverlapChart unet={unetBench} grabcut={grabcutBench} /> : <p className="text-xs text-[#94A3B8]">Benchmark unavailable for selected pair.</p>}
 
           {unetBench && grabcutBench && (
             <div className="mt-4 pt-3 border-t border-[#475569]/50">
               <HorizontalRatioBars
                 rows={[
                   {
-                    label: 'Mean Inference Latency (ms)',
+                    label: 'Recorded latency (ms; different hardware possible)',
                     unet: unetBench.inference_ms,
                     grabcut: grabcutBench.inference_ms,
                     format: (v) => `${v.toFixed(1)} ms`,
@@ -489,8 +450,7 @@ export function ComparisonView({
             <div className="flex-1 flex flex-col items-center justify-center py-10 text-center space-y-2">
               <ImageIcon className="h-7 w-7 text-[#94A3B8]" />
               <p className="text-xs text-[#94A3B8]">
-                Select or upload an image in the Workstation tab to inspect live morphology
-                metrics.
+                Run both selected models with morphology enabled to inspect live metrics.
               </p>
             </div>
           )}

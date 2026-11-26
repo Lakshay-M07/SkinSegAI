@@ -68,6 +68,7 @@ export function WorkstationView({
   segmentLoading,
   segmentError,
   resultRevision,
+  primaryName, secondaryName, extraControls,
 }) {
   const unetSrc = segmentResult?.unet?.overlay_base64
     ? `data:image/png;base64,${segmentResult.unet.overlay_base64}`
@@ -188,7 +189,7 @@ export function WorkstationView({
         {/* Live Controls Bar */}
         <BentoCard
           title="Live Inference Controls"
-          subtitle="Debounced real-time /api/segment parameters"
+          subtitle="Prepare settings, then approve segmentation"
           badge={segmentLoading ? 'Running inference…' : 'Ready'}
           badgeTone={segmentLoading ? 'coral' : 'aqua'}
           className="lg:col-span-7"
@@ -272,7 +273,7 @@ export function WorkstationView({
                   </div>
                   <input
                     type="range"
-                    min="0.10"
+                    min="0.00"
                     max="1.00"
                     step="0.05"
                     value={opacity}
@@ -297,6 +298,7 @@ export function WorkstationView({
             </div>
           </div>
 
+          {extraControls}
           {/* Status strip */}
           <div className="mt-3 pt-2.5 border-t border-[#475569]/50 flex items-center justify-between text-[11px]">
             {segmentError ? (
@@ -307,12 +309,11 @@ export function WorkstationView({
             ) : segmentLoading ? (
               <span className="text-[#22D3EE] flex items-center gap-1.5 font-mono-num">
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-[#22D3EE]" />
-                Running U-Net &amp; GrabCut inference…
+                Processing request…
               </span>
             ) : (
               <span className="text-[#94A3B8]">
-                Adjusting sliders automatically updates overlays via debounced{' '}
-                <code className="font-mono-num text-[#CFD8E3]">POST /api/segment</code>.
+                Changes are staged until you prepare and approve a proposal.
               </span>
             )}
 
@@ -355,15 +356,15 @@ export function WorkstationView({
           </BentoCard>
 
           <BentoCard
-            title="U-NET SEGMENTATION"
+            title={`${primaryName} segmentation`}
             badge={unetLatency != null ? `${unetLatency.toFixed(1)} ms` : 'Pending'}
             badgeTone="aqua"
           >
             <ImageFrame
               src={unetSrc}
-              alt="U-Net segmentation"
+              alt={`${primaryName} segmentation`}
               emptyIcon={Sparkles}
-              emptyText="U-Net prediction will appear once an image is selected."
+              emptyText="No result for this model. Select a model and approve segmentation."
               revealKey={`unet-${resultRevision}`}
             />
             {segmentResult?.unet?.measurements && (
@@ -377,15 +378,15 @@ export function WorkstationView({
           </BentoCard>
 
           <BentoCard
-            title="GRABCUT BASELINE"
+            title={`${secondaryName} segmentation`}
             badge={grabcutLatency != null ? `${grabcutLatency.toFixed(1)} ms` : 'Pending'}
             badgeTone="coral"
           >
             <ImageFrame
               src={grabcutSrc}
-              alt="GrabCut baseline"
+              alt={`${secondaryName} segmentation`}
               emptyIcon={Layers}
-              emptyText="GrabCut comparison will appear once an image is selected."
+              emptyText="No result for this model. Select a model and approve segmentation."
               revealKey={`gc-${resultRevision}`}
             />
             {segmentResult?.grabcut?.measurements && (
@@ -401,11 +402,11 @@ export function WorkstationView({
       )}
 
       {/* Uncertainty & Ground-Truth Error Inspection Row */}
-      {segmentResult && (includeUncertainty || segmentResult.error_map_base64) && (
+      {segmentResult && (segmentResult.configuration.include_uncertainty || segmentResult.error_map_base64) && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {includeUncertainty && segmentResult.uncertainty_heatmap_base64 && (
+          {segmentResult.configuration.include_uncertainty && segmentResult.uncertainty_heatmap_base64 && (
             <BentoCard
-              title="SINGLE-PASS UNCERTAINTY HEATMAP"
+              title={`${primaryName} uncertainty heatmap`}
               subtitle="Binary predictive entropy H(p) — peaks at ambiguous borders (p ≈ 0.5)"
               badge={
                 borderUncertainty != null
@@ -461,13 +462,13 @@ export function WorkstationView({
           {segmentResult.error_map_base64 && (
             <BentoCard
               title="TP / FP / FN COMPARISON"
-              subtitle="U-Net prediction vs ground-truth mask"
+              subtitle={`${primaryName} prediction vs ground-truth mask`}
               badge={
                 unetMetrics ? `Dice ${unetMetrics.dice.toFixed(4)}` : 'Ground Truth'
               }
               badgeTone="coral"
               className={
-                includeUncertainty && segmentResult.uncertainty_heatmap_base64
+                segmentResult.configuration.include_uncertainty && segmentResult.uncertainty_heatmap_base64
                   ? 'lg:col-span-5'
                   : 'lg:col-span-12'
               }
