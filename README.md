@@ -291,15 +291,31 @@ Ensure the trained checkpoint exists at:
 artifacts/checkpoints/best_model.pth
 ```
 
-Launch Streamlit:
+### Option 1: React + FastAPI Workstation (Recommended)
+
+1. Start the FastAPI backend (Terminal 1):
+
+```bash
+python -m uvicorn backend.main:app --reload --port 8000
+```
+
+2. Start the React + Vite frontend (Terminal 2):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173 in your browser.
+
+### Option 2: Streamlit Workstation
 
 ```bash
 python -m streamlit run gui/app.py
 ```
 
-Open the application in your browser:
-
-http://localhost:8501
+Open http://localhost:8501 in your browser.
 
 The original dataset is not required for inference on uploaded images when the trained checkpoint is available. The built-in validation dataset sample feature requires local processed dataset files.
 
