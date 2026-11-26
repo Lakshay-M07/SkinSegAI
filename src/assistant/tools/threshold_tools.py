@@ -59,6 +59,7 @@ class AnalyzeThresholdsTool(BaseTool):
             session.get_results(),
             thresholds=arguments.get("thresholds"),
             current_threshold=session.config.threshold,
+            ground_truth=session.get_ground_truth(),
         )
 
         return {

@@ -26,6 +26,7 @@ class SessionContext:
 
         self._image = None
         self._image_id = None
+        self._ground_truth = None
 
         self._config = SegmentationConfig()
 
@@ -53,7 +54,7 @@ class SessionContext:
     def config(self):
         return self._config
 
-    def set_image(self, image):
+    def set_image(self, image, *, ground_truth=None):
         """Register a new image and invalidate previous results."""
 
         if not isinstance(image, Image.Image):
@@ -69,6 +70,11 @@ class SessionContext:
                 "Image exceeds the 12-megapixel limit."
             )
 
+        reference = self._validate_ground_truth(
+            ground_truth,
+            (height, width),
+        )
+
         prepared = image.convert("RGB").copy()
 
         digest = hashlib.sha256()
@@ -81,11 +87,67 @@ class SessionContext:
 
         self._image = prepared
         self._image_id = digest.hexdigest()
+        self._ground_truth = reference
 
         self._results.clear()
         self._revision += 1
 
         return self._image_id
+
+    @staticmethod
+    def _validate_ground_truth(mask, expected_shape):
+        """Validate a binary reference mask without resizing."""
+
+        if mask is None:
+            return None
+
+        if not isinstance(mask, np.ndarray):
+            raise TypeError(
+                "Ground truth must be a NumPy array."
+            )
+
+        if mask.ndim != 2:
+            raise ValueError(
+                "Ground truth must be a two-dimensional mask."
+            )
+
+        if mask.shape != expected_shape:
+            raise ValueError(
+                "Ground-truth dimensions must match the image."
+            )
+
+        if mask.dtype.kind not in ("b", "u", "i"):
+            raise TypeError(
+                "Ground truth must contain boolean or integer values."
+            )
+
+        binary_01 = np.all(
+            (mask == 0) | (mask == 1)
+        )
+
+        binary_255 = np.all(
+            (mask == 0) | (mask == 255)
+        )
+
+        if not (binary_01 or binary_255):
+            raise ValueError(
+                "Ground truth must use binary 0/1 or 0/255 values."
+            )
+
+        return mask.astype(np.bool_, copy=True)
+
+    @property
+    def has_ground_truth(self):
+
+        return self._ground_truth is not None
+
+    def get_ground_truth(self):
+        """Return an independent copy of the reference mask."""
+
+        if self._ground_truth is None:
+            return None
+
+        return self._ground_truth.copy()
 
     def get_image(self):
         """Return a copy of the current image."""
@@ -325,6 +387,8 @@ class SessionContext:
         return {
             "image_uploaded": self.has_image,
 
+            "ground_truth_available": self.has_ground_truth,
+
             "analysis_completed": self.has_results,
 
             "revision": self._revision,
@@ -356,6 +420,7 @@ class SessionContext:
 
         self._image = None
         self._image_id = None
+        self._ground_truth = None
 
         self._config = SegmentationConfig()
 

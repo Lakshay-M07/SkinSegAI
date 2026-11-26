@@ -131,6 +131,7 @@ class AssistantReportExporter:
             self._threshold.analyze_all(
                 results,
                 current_threshold=config.threshold,
+                ground_truth=session.get_ground_truth(),
             )
         )
 

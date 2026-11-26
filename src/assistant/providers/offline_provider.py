@@ -334,6 +334,28 @@ class OfflineProvider(BaseProvider):
                 f"{entry['inference_ms']:.2f} ms"
             )
 
+            metrics = entry.get("ground_truth_metrics")
+
+            if metrics is not None:
+
+                lines.append(
+                    "- Reference-mask evaluation:"
+                )
+
+                for key, label in (
+                    ("dice", "Dice"),
+                    ("iou", "IoU"),
+                    ("precision", "Precision"),
+                    ("recall", "Recall"),
+                ):
+
+                    if key in metrics:
+
+                        lines.append(
+                            f"  - {label}: "
+                            f"{self._percent(metrics[key])}"
+                        )
+
         lines.append(
             "\nPredicted lesion area is not a medical diagnosis."
         )

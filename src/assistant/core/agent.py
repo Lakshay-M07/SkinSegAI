@@ -188,6 +188,20 @@ Rules:
 
             return self._session.get_context()
 
+    def get_image(self):
+        """Return a copy for trusted application code."""
+
+        with self._lock:
+
+            return self._session.get_image()
+
+    def get_ground_truth(self):
+        """Return a copy for trusted evaluation and visualization."""
+
+        with self._lock:
+
+            return self._session.get_ground_truth()
+
     def get_results(self):
         """Return current segmentation results for trusted UI code.
 
@@ -222,12 +236,15 @@ Rules:
 
             self._provider = provider
 
-    def upload_image(self, image):
+    def upload_image(self, image, *, ground_truth=None):
         """Register an image and initiate the guided conversation."""
 
         with self._lock:
 
-            self._session.set_image(image)
+            self._session.set_image(
+                image,
+                ground_truth=ground_truth,
+            )
 
             self._memory.clear()
 

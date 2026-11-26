@@ -299,6 +299,7 @@ class RunSegmentationTool(BaseTool):
             results = service.compare(
                 image,
                 alpha=config.overlay_alpha,
+                ground_truth=session.get_ground_truth(),
                 mc_passes=config.mc_passes,
             )
 
