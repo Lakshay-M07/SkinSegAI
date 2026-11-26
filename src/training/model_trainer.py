@@ -6,14 +6,19 @@ import torch
 from pathlib import Path
 from tqdm import tqdm
 
-from src.training.losses import BCEDiceLoss
+from src.training.losses import CompositeSegmentationLoss
 from src.evaluation.metrics import MetricsEvaluator
 
 
 class ModelTrainer:
 
     def __init__(self, model, device, output_dir,
-                 learning_rate=0.001, patience=7):
+                 learning_rate=0.001, patience=7,
+                 arch="custom_unet",
+                 criterion=None,
+                 dice_weight=0.4,
+                 bce_weight=0.3,
+                 boundary_weight=0.3):
 
         self._device = device
         self._model = model.to(device)
@@ -23,7 +28,15 @@ class ModelTrainer:
             parents=True, exist_ok=True
         )
 
-        self._criterion = BCEDiceLoss()
+        if criterion is not None:
+            self._criterion = criterion
+        else:
+            self._criterion = CompositeSegmentationLoss(
+                dice_weight=dice_weight,
+                bce_weight=bce_weight,
+                boundary_weight=boundary_weight
+            )
+
         self._evaluator = MetricsEvaluator()
 
         self._optimizer = torch.optim.AdamW(
@@ -44,6 +57,7 @@ class ModelTrainer:
         self._patience = patience
         self._best_dice = -1.0
         self._history = []
+        self._arch = arch
 
     def _run_epoch(self, loader, training):
 
@@ -51,6 +65,10 @@ class ModelTrainer:
 
         totals = {
             "loss": 0.0,
+            "total_loss": 0.0,
+            "dice_loss": 0.0,
+            "bce_loss": 0.0,
+            "boundary_loss": 0.0,
             "dice": 0.0,
             "iou": 0.0,
             "precision": 0.0,
@@ -77,7 +95,14 @@ class ModelTrainer:
                     )
 
                 logits = self._model(images)
-                loss = self._criterion(logits, masks)
+
+                if hasattr(self._criterion, "compute_components"):
+                    loss, loss_components = self._criterion(
+                        logits, masks, return_components=True
+                    )
+                else:
+                    loss = self._criterion(logits, masks)
+                    loss_components = {"total_loss": loss}
 
                 loss_value = loss.item()
 
@@ -95,9 +120,17 @@ class ModelTrainer:
                 batch_size = images.size(0)
                 samples += batch_size
 
-                totals["loss"] += (
-                    loss_value * batch_size
-                )
+                totals["loss"] += loss_value * batch_size
+
+                for comp_name, comp_tensor in loss_components.items():
+                    val = comp_tensor.item() if hasattr(comp_tensor, "item") else float(comp_tensor)
+                    if comp_name not in totals:
+                        totals[comp_name] = 0.0
+                    totals[comp_name] += val * batch_size
+
+                # Ensure total_loss is synchronized with loss
+                if "total_loss" not in loss_components:
+                    totals["total_loss"] += loss_value * batch_size
 
                 for name, value in metrics.items():
                     totals[name] += value * batch_size
@@ -117,8 +150,9 @@ class ModelTrainer:
 
     def _save_checkpoint(self, epoch, validation):
 
-        torch.save({
+        checkpoint_data = {
             "epoch": epoch,
+            "arch": self._arch,
             "model_state_dict": self._model.state_dict(),
             "optimizer_state_dict":
                 self._optimizer.state_dict(),
@@ -127,7 +161,16 @@ class ModelTrainer:
             "validation_metrics": validation,
             "image_size": (256, 256),
             "threshold": 0.5
-        }, self._output_dir / "best_model.pth")
+        }
+
+        if hasattr(self._criterion, "dice_weight"):
+            checkpoint_data["loss_weights"] = {
+                "dice_weight": self._criterion.dice_weight,
+                "bce_weight": self._criterion.bce_weight,
+                "boundary_weight": self._criterion.boundary_weight,
+            }
+
+        torch.save(checkpoint_data, self._output_dir / "best_model.pth")
 
     def _save_history(self):
 
@@ -176,8 +219,16 @@ class ModelTrainer:
             self._history.append(record)
             self._save_history()
 
-            print(f"Train loss: {train['loss']:.4f}")
-            print(f"Validation loss: {validation['loss']:.4f}")
+            dice_str = f"Dice: {train.get('dice_loss', 0.0):.4f}"
+            bce_str = f"BCE: {train.get('bce_loss', 0.0):.4f}"
+            bnd_str = f"Boundary: {train.get('boundary_loss', 0.0):.4f}"
+            print(f"Train loss: {train['loss']:.4f} ({dice_str}, {bce_str}, {bnd_str})")
+
+            val_dice_str = f"Dice: {validation.get('dice_loss', 0.0):.4f}"
+            val_bce_str = f"BCE: {validation.get('bce_loss', 0.0):.4f}"
+            val_bnd_str = f"Boundary: {validation.get('boundary_loss', 0.0):.4f}"
+            print(f"Validation loss: {validation['loss']:.4f} ({val_dice_str}, {val_bce_str}, {val_bnd_str})")
+
             print(f"Validation Dice: {validation['dice']:.4f}")
             print(f"Validation IoU: {validation['iou']:.4f}")
 

@@ -6,8 +6,11 @@ import numpy as np
 
 class ImagePreprocessor:
 
-    def __init__(self, image_size=(256, 256)):
+    def __init__(self, image_size=(256, 256),
+                 mean=None, std=None):
         self._image_size = image_size
+        self._mean = mean  # per-channel tuple, e.g. (0.485, 0.456, 0.406)
+        self._std = std    # per-channel tuple, e.g. (0.229, 0.224, 0.225)
 
     @property
     def image_size(self):
@@ -29,9 +32,16 @@ class ImagePreprocessor:
 
     def normalize_image(self, image):
 
-        return np.asarray(
+        array = np.asarray(
             image, dtype=np.float32
         ) / 255.0
+
+        if self._mean is not None and self._std is not None:
+            mean = np.array(self._mean, dtype=np.float32)
+            std = np.array(self._std, dtype=np.float32)
+            array = (array - mean) / std
+
+        return array
 
     def normalize_mask(self, mask):
 

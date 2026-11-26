@@ -4,57 +4,61 @@
 
 ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
 ![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Working-brightgreen)
 
 ## Overview
 
-SkinSegAI is an object-oriented, GUI-based skin lesion segmentation and comparative analysis application developed using Python.
+SkinSegAI is an object-oriented skin lesion segmentation and comparative analysis application featuring a **FastAPI + React (Vite + Tailwind CSS)** web workstation alongside a **Streamlit** GUI.
 
-The system implements a custom lightweight U-Net neural network trained on dermoscopic images from the ISIC 2018 dataset and compares its performance against GrabCut, a traditional graph-based image segmentation algorithm.
+The system supports both a custom lightweight U-Net and ImageNet-pretrained encoder U-Net backbones (`resnet34_unet`, `efficientnet_b2_unet`) trained on dermoscopic images from the ISIC 2018 dataset with a composite edge-sharpening loss, and compares performance against GrabCut, a traditional graph-based image segmentation algorithm.
 
-The application integrates deep learning, image processing, quantitative performance evaluation, lesion morphology analysis and interactive visualization within a modular software architecture.
+The application integrates deep learning, image processing, pixel-wise uncertainty estimation, quantitative performance evaluation, lesion morphology analysis and interactive visualization within a modular software architecture.
 
 ## Key Features
 
-- Custom U-Net architecture trained from scratch.
+- Selectable U-Net architectures: `resnet34_unet` (ImageNet-pretrained), `efficientnet_b2_unet` (ImageNet-pretrained), and `custom_unet` (from-scratch).
+- Composite edge-sharpening loss (`CompositeSegmentationLoss`) combining Soft Dice, BCE with Logits, and a differentiable morphological Boundary Loss.
+- Pixel-wise uncertainty heatmaps (binary predictive entropy + optional MC Dropout) and Border Uncertainty Score.
 - Automatic GrabCut segmentation.
 - Side-by-side algorithm comparison.
-- Interactive image segmentation interface.
+- Interactive image segmentation interface with `@st.cache_resource` model caching.
 - Adjustable prediction threshold and overlay opacity.
 - Binary mask and lesion boundary visualization.
 - Lesion morphology and geometrical analysis.
 - Optional ground-truth mask evaluation.
-- Interactive training and performance analytics.
+- Interactive training and performance analytics (including per-component loss curves).
 - Downloadable segmentation masks and analytical reports.
 - Metadata-based group-aware dataset splitting.
-- Apple Silicon GPU acceleration with CPU fallback.
+- NVIDIA CUDA and Apple Silicon MPS GPU acceleration with CPU fallback.
 - Modular object-oriented architecture.
 
 ## Experimental Results
 
-Both segmentation algorithms were evaluated on the same 390 held-out test images.
+Both segmentation algorithms were evaluated on the same 390 held-out test images using the trained `resnet34_unet` checkpoint.
 
-| Evaluation Metric | U-Net | GrabCut |
+| Evaluation Metric | U-Net (`resnet34_unet`) | GrabCut |
 |---|---:|---:|
-| Dice Coefficient | **0.8687** | 0.6146 |
-| Intersection over Union | **0.7929** | 0.5120 |
-| Precision | **0.8834** | 0.6021 |
-| Recall | **0.8957** | 0.8697 |
-| Dice Standard Deviation | **0.1550** | 0.3082 |
-| Mean Inference Time | **19.84 ms** | 592.28 ms |
-| Median Inference Time | **20.47 ms** | 500.33 ms |
+| Dice Coefficient | **0.8779** | 0.6146 |
+| Intersection over Union | **0.8023** | 0.5120 |
+| Precision | **0.8893** | 0.6021 |
+| Recall | **0.9014** | 0.8697 |
+| Dice Standard Deviation | **0.1370** | 0.3082 |
+| Mean Inference Time | **126.01 ms** | 1933.82 ms |
+| Median Inference Time | **166.92 ms** | 1581.80 ms |
 
 ### Key Findings
 
-- U-Net achieved a mean test Dice coefficient of 86.87%.
-- U-Net demonstrated a 25.41 percentage-point improvement in Dice over GrabCut.
-- U-Net achieved approximately 29.9 times faster inference in the recorded benchmark.
-- U-Net demonstrated greater segmentation consistency across the test dataset.
-- The best recorded validation Dice coefficient was 85.77%.
+- U-Net (`resnet34_unet`) achieved a mean test Dice coefficient of 87.79% and IoU of 80.23%.
+- U-Net demonstrated a 26.32 percentage-point improvement in Dice over GrabCut.
+- U-Net achieved approximately 15.3 times faster mean inference in the recorded benchmark.
+- U-Net demonstrated greater segmentation consistency across the test dataset (Dice std `0.1370` vs. `0.3082`).
+- The best recorded validation Dice coefficient was 87.65%.
 
-The inference benchmark was conducted using Apple MPS acceleration for U-Net and CPU execution for GrabCut. Therefore, the speed comparison includes differences in hardware acceleration.
+The inference benchmark was conducted using NVIDIA RTX 3050 CUDA acceleration for U-Net and CPU execution for GrabCut. Therefore, the speed comparison includes differences in hardware acceleration.
 
 These results represent segmentation performance, not clinical diagnostic accuracy.
 
@@ -81,26 +85,27 @@ https://api.isic-archive.com/collections/63/metadata/
 
 The original dataset, processed images and patient metadata are not included in this repository.
 
-## U-Net Architecture
+## Model Architectures & Loss Function
 
-The custom U-Net consists of four encoder blocks, a bottleneck, four decoder blocks and skip connections.
+The model factory (`src/models/model_factory.py`) supports three architectures with automatic ImageNet normalization for pretrained encoders and checkpoint-driven architecture detection during inference:
+
+| Architecture Key | Description | Normalization |
+|---|---|---|
+| `resnet34_unet` (default) | `smp.Unet` with ImageNet-pretrained ResNet-34 encoder | ImageNet mean/std |
+| `efficientnet_b2_unet` | `smp.Unet` with ImageNet-pretrained EfficientNet-B2 encoder | ImageNet mean/std |
+| `custom_unet` | Lightweight 2D U-Net trained from scratch (1,942,577 params) | `[0, 1]` scaling |
 
 | Parameter | Configuration |
 |---|---|
-| Architecture | Lightweight 2D U-Net |
-| Input Channels | 3 |
-| Output Channels | 1 |
+| Input / Output Channels | 3 (RGB) / 1 (Logits) |
 | Input Resolution | 256 × 256 |
-| Encoder Filters | 16, 32, 64, 128 |
-| Bottleneck Filters | 256 |
-| Trainable Parameters | 1,942,577 |
-| Optimizer | AdamW |
-| Learning Rate | 0.001 |
-| Loss Function | Binary Cross-Entropy + Dice Loss |
+| Optimizer | AdamW (`weight_decay=1e-4`) |
+| Learning Rate | 0.001 (`ReduceLROnPlateau`) |
+| Loss Function | `CompositeSegmentationLoss` (0.4 Dice + 0.3 BCE + 0.3 Boundary) |
 | Prediction Threshold | 0.5 |
-| Hardware Acceleration | Apple MPS / CPU |
+| Hardware Acceleration | NVIDIA CUDA / Apple MPS / CPU |
 
-The model incorporates learning-rate scheduling, early stopping and best-model checkpointing.
+The model incorporates learning-rate scheduling, early stopping, per-component loss logging, and best-model checkpointing.
 
 ## Object-Oriented Programming
 
@@ -133,8 +138,9 @@ The project demonstrates the four fundamental pillars of object-oriented program
 | ImagePreprocessor | Image and mask preprocessing |
 | LesionDataset | PyTorch dataset loading and augmentation |
 | BaseSegmenter | Abstract segmentation interface |
-| UNet | Neural network architecture |
-| UNetSegmenter | Deep learning inference |
+| UNet / model_factory | Neural network architectures and pretrained encoder builder |
+| CompositeSegmentationLoss | Combined Soft Dice, BCE with Logits, and morphological Boundary Loss |
+| UNetSegmenter | Deep learning inference and predictive entropy / MC Dropout uncertainty |
 | GrabCutSegmenter | Traditional segmentation |
 | ModelTrainer | Training, validation and checkpointing |
 | MetricsEvaluator | Quantitative performance evaluation |
@@ -171,33 +177,37 @@ The application calculates:
 
 All measurements are pixel-based estimates and should not be interpreted as clinical diagnostic indicators.
 
-## Graphical User Interface
+## Web Interface & API
 
-The application provides five interactive sections.
+The primary React + FastAPI workstation provides three top-level tabs:
 
-| Page | Description |
+| Tab / Surface | Description |
 |---|---|
-| Dashboard | Project overview and benchmark statistics |
-| Live Segmentation | Interactive segmentation and lesion analysis |
-| Model Comparison | Quantitative algorithm comparison |
-| Training Analytics | Training loss and performance curves |
-| About Project | Architecture, methodology and OOP concepts |
+| `Workstation` | Curated sample selector, image/GT upload, debounced threshold/opacity/overlay-style controls, U-Net vs. GrabCut panels, single-pass uncertainty heatmap, and TP/FP/FN error map |
+| `Performance Comparison` | Held-out test KPI cards, SVG overlap & latency charts, live lesion morphology comparison, and JSON/CSV/PNG exports |
+| `About Project` | Project overview, key features, key findings, workflow diagram, limitations, and disclaimer |
+| `FastAPI Backend` | `/api/health`, `/api/samples`, `/api/samples/{name}`, `/api/segment`, and `/api/benchmark` with startup checkpoint caching |
+
+A standalone Streamlit workstation is also available in `gui/app.py`.
 
 ## Technology Stack
 
 | Technology | Purpose |
 |---|---|
 | Python | Core application development |
-| PyTorch | Deep learning and U-Net training |
+| PyTorch | Deep learning, custom U-Net training, and CUDA/MPS acceleration |
+| segmentation-models-pytorch & timm | ImageNet-pretrained U-Net encoder backbones |
+| FastAPI & Uvicorn | REST API backend with startup model caching |
+| React, Vite & Tailwind CSS | Modern dark-mode clinical workstation UI |
 | OpenCV | GrabCut and image processing |
-| Streamlit | Graphical user interface |
+| Streamlit | Alternative Python GUI |
 | NumPy | Numerical computation |
 | Pandas | Dataset and benchmark analysis |
 | Pillow | Image loading and manipulation |
-| Plotly | Interactive data visualization |
+| Plotly | Interactive data visualization (Streamlit) |
 | Matplotlib | Scientific visualization |
 | Scikit-learn | Dataset partitioning |
-| Pytest | Automated testing framework |
+| Pytest & HTTPX | Automated unit and API smoke testing |
 
 ## Project Structure
 
@@ -212,12 +222,26 @@ SkinSegAI/
 │   └── metrics/
 │       ├── comparison_summary.csv
 │       └── per_image_results.csv
+├── backend/
+│   ├── main.py
+│   ├── routes.py
+│   ├── schemas.py
+│   └── services.py
 ├── configs/
 ├── data/
 │   ├── raw/
 │   ├── processed_grouped/
 │   └── splits_grouped/
 ├── docs/
+├── frontend/
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.js
+│   └── src/
+│       ├── api/client.js
+│       ├── components/
+│       ├── App.jsx
+│       └── index.css
 ├── gui/
 │   └── app.py
 ├── scripts/
@@ -286,15 +310,31 @@ Ensure the trained checkpoint exists at:
 artifacts/checkpoints/best_model.pth
 ```
 
-Launch Streamlit:
+### Option 1: React + FastAPI Workstation (Recommended)
+
+1. Start the FastAPI backend (Terminal 1):
+
+```bash
+python -m uvicorn backend.main:app --reload --port 8000
+```
+
+2. Start the React + Vite frontend (Terminal 2):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:5173 in your browser.
+
+### Option 2: Streamlit Workstation
 
 ```bash
 python -m streamlit run gui/app.py
 ```
 
-Open the application in your browser:
-
-http://localhost:8501
+Open http://localhost:8501 in your browser.
 
 The original dataset is not required for inference on uploaded images when the trained checkpoint is available. The built-in validation dataset sample feature requires local processed dataset files.
 
@@ -336,23 +376,31 @@ python -m scripts.verify_model
 Run a training smoke test:
 
 ```bash
-python -m scripts.train_model --smoke
+python scripts/train_model.py --arch resnet34_unet --smoke
 ```
 
-Train U-Net:
+Train U-Net (default `resnet34_unet` with `CompositeSegmentationLoss`):
 
 ```bash
-python -m scripts.train_model --epochs 30 --batch-size 4
+python scripts/train_model.py --arch resnet34_unet --epochs 20 --batch-size 8
 ```
 
-Training automatically generates model checkpoints and epoch-wise performance history.
+Available training CLI flags:
+
+- `--arch`: `resnet34_unet` (default), `efficientnet_b2_unet`, or `custom_unet`
+- `--epochs`: number of training epochs (default `30`)
+- `--batch-size`: training/validation batch size (default `4`)
+- `--dice-weight`, `--bce-weight`, `--boundary-weight`: `CompositeSegmentationLoss` weights (defaults `0.4`, `0.3`, `0.3`)
+- `--smoke`: run a 1-epoch smoke test on a small subset
+
+Training automatically generates model checkpoints (with `arch` and `loss_weights` metadata) and epoch-wise component loss/performance history.
 
 ## Model Evaluation
 
 Execute the comparative benchmark:
 
 ```bash
-python -m scripts.evaluate_models
+python scripts/evaluate_models.py
 ```
 
 The evaluation generates:
@@ -366,9 +414,10 @@ Results are stored in `artifacts/metrics/`.
 
 ## Verification and Testing
 
-The project includes dedicated verification scripts for its major components.
+The project includes automated `pytest` unit tests and dedicated verification scripts for its major components.
 
 ```bash
+python -m pytest tests/ -v
 python -m scripts.verify_dataset
 python -m scripts.verify_model
 python -m scripts.verify_segmenters
@@ -376,11 +425,10 @@ python -m scripts.verify_analysis
 python -m scripts.verify_service
 ```
 
-Verification covers dataset integrity, tensor dimensions, forward propagation, backpropagation, segmentation outputs, morphology calculations, backend integration and report generation.
+Tests and verification cover model architecture output shapes, `CompositeSegmentationLoss` gradients and edge-sharpening behavior, predictive entropy and MC Dropout uncertainty, dataset integrity, morphology calculations, backend integration, and report generation.
 
 ## Future Enhancements
 
-- U-Net pixel probability heatmaps.
 - Segmentation error visualization.
 - Algorithm disagreement maps.
 - Individual connected-region analysis.

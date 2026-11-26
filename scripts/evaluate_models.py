@@ -1,6 +1,15 @@
 
+"""Evaluate trained SkinSegAI segmentation models."""
+
+import argparse
 import csv
+import sys
 from pathlib import Path
+
+project_root = Path(__file__).resolve().parents[1]
+
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import torch
 from PIL import Image
@@ -8,6 +17,9 @@ from PIL import Image
 from src.data.dataset_manager import DatasetManager
 from src.data.dataset_splitter import DatasetSplitter
 from src.data.metadata_loader import MetadataLoader
+
+from src.models.artifacts import ModelArtifactRegistry
+from src.models.model_factory import SUPPORTED_ARCHITECTURES
 
 from src.segmentation.unet_segmenter import UNetSegmenter
 from src.segmentation.grabcut_segmenter import GrabCutSegmenter
@@ -33,7 +45,6 @@ def verify_splits(root):
     manager = DatasetManager(root / "data/raw")
     manager.load_dataset()
 
-    # Automatically discover the metadata CSV.
     metadata_loader = MetadataLoader(root / "data/raw")
     metadata_path = metadata_loader.find_metadata()
 
@@ -41,7 +52,7 @@ def verify_splits(root):
 
     splitter = DatasetSplitter(
         metadata_path=metadata_path,
-        random_seed=42
+        random_seed=42,
     )
 
     expected = splitter.split(manager.get_pairs())
@@ -104,18 +115,40 @@ def main():
 
     root = Path(__file__).resolve().parents[1]
 
-    # Verify dataset integrity and group separation.
-    verify_splits(root)
+    # ----------------------------------------------- #
+    # Command-line configuration
+    # ----------------------------------------------- #
 
-    # Select Apple GPU when available.
-    device = (
-        "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
+    parser = argparse.ArgumentParser(
+        description="Evaluate SkinSegAI segmentation models."
     )
 
+    parser.add_argument(
+        "--arch",
+        choices=SUPPORTED_ARCHITECTURES,
+        default="resnet34_unet",
+        help="Architecture to evaluate.",
+    )
+
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="Optional checkpoint from a new training run.",
+    )
+
+    args = parser.parse_args()
+
+    registry = ModelArtifactRegistry(root)
+
+    # ----------------------------------------------- #
+    # Resolve checkpoint
+    # ----------------------------------------------- #
+
     checkpoint_path = (
-        root / "artifacts/checkpoints/best_model.pth"
+        args.checkpoint.resolve()
+        if args.checkpoint is not None
+        else registry.require_checkpoint(args.arch)
     )
 
     if not checkpoint_path.is_file():
@@ -124,22 +157,52 @@ def main():
             f"{checkpoint_path}"
         )
 
-    # Initialize both segmentation algorithms.
-    segmenters = [
+    # ----------------------------------------------- #
+    # Verify dataset
+    # ----------------------------------------------- #
 
-        UNetSegmenter(
-            checkpoint_path=checkpoint_path,
-            device=device,
-            threshold=0.5
-        ),
+    verify_splits(root)
 
-        GrabCutSegmenter(
-            iterations=5,
-            margin=0.05
+    # ----------------------------------------------- #
+    # Hardware selection
+    # ----------------------------------------------- #
+
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
+
+    # ----------------------------------------------- #
+    # Initialize segmentation algorithms
+    # ----------------------------------------------- #
+
+    unet = UNetSegmenter(
+        checkpoint_path=checkpoint_path,
+        device=device,
+        threshold=0.5,
+    )
+
+    if unet.arch != args.arch:
+        raise ValueError(
+            f"Checkpoint architecture mismatch: "
+            f"expected '{args.arch}', "
+            f"found '{unet.arch}'."
         )
-    ]
 
-    # Load the independent test dataset.
+    grabcut = GrabCutSegmenter(
+        iterations=5,
+        margin=0.05,
+    )
+
+    segmenters = [unet, grabcut]
+
+    # ----------------------------------------------- #
+    # Load independent test dataset
+    # ----------------------------------------------- #
+
     records = read_records(
         root / "data/splits_grouped/test.csv"
     )
@@ -147,13 +210,16 @@ def main():
     if not records:
         raise ValueError("Test dataset is empty.")
 
-    # Warm up both algorithms using a validation image.
     validation = read_records(
         root / "data/splits_grouped/validation.csv"
     )
 
     if not validation:
         raise ValueError("Validation dataset is empty.")
+
+    # ----------------------------------------------- #
+    # Warm up both algorithms
+    # ----------------------------------------------- #
 
     with Image.open(
         root / validation[0]["image"]
@@ -169,25 +235,43 @@ def main():
 
         print(f"{segmenter.name}: Ready")
 
-    # Display benchmark configuration.
+    if device == "cuda":
+        torch.cuda.synchronize()
+
+    elif device == "mps":
+        torch.mps.synchronize()
+
+    # ----------------------------------------------- #
+    # Display benchmark configuration
+    # ----------------------------------------------- #
+
     print("\n===== BENCHMARK CONFIGURATION =====")
 
+    print("Architecture:", args.arch)
+    print("Model:", registry.display_name(args.arch))
     print("Test samples:", len(records))
     print("U-Net device:", device)
     print("GrabCut device: CPU")
     print("U-Net threshold: 0.5")
     print("GrabCut iterations: 5")
     print("GrabCut margin: 0.05")
-    print("Model checkpoint:", checkpoint_path.name)
+    print("Model checkpoint:", checkpoint_path)
 
-    # Execute comparative benchmarking.
+    # ----------------------------------------------- #
+    # Execute benchmark
+    # ----------------------------------------------- #
+
     benchmark = SegmentationBenchmark(segmenters)
 
-    results = benchmark.evaluate(records, root)
+    results = benchmark.evaluate(
+        records,
+        root,
+    )
 
-    summary = benchmark.summarize(results)
+    # ----------------------------------------------- #
+    # Verify result completeness
+    # ----------------------------------------------- #
 
-    # Verify that both algorithms evaluated all samples.
     expected_rows = len(records) * len(segmenters)
 
     if len(results) != expected_rows:
@@ -196,6 +280,11 @@ def main():
             f"Expected {expected_rows}, "
             f"received {len(results)}."
         )
+
+    expected_images = {
+        record["image"]
+        for record in records
+    }
 
     for segmenter in segmenters:
 
@@ -206,50 +295,62 @@ def main():
         if (
             len(algorithm_results) != len(records)
             or algorithm_results["image"].duplicated().any()
-            or set(algorithm_results["image"]) != {
-                record["image"] for record in records
-            }
+            or set(algorithm_results["image"]) != expected_images
         ):
             raise RuntimeError(
                 f"Incomplete or duplicate results for "
                 f"{segmenter.name}."
             )
 
-    # Create the results directory.
-    output_dir = root / "artifacts/metrics"
+    summary = benchmark.summarize(results)
 
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True
+    # ----------------------------------------------- #
+    # Create isolated evaluation directory
+    # ----------------------------------------------- #
+
+    output_dir = registry.create_run_directory(
+        args.arch,
+        kind="evaluation",
     )
 
-    # Save individual image results.
+    # ----------------------------------------------- #
+    # Export individual image results
+    # ----------------------------------------------- #
+
     results_path = (
         output_dir / "per_image_results.csv"
     )
 
     results.to_csv(
         results_path,
-        index=False
+        index=False,
     )
 
-    # Save aggregated comparative results.
+    # ----------------------------------------------- #
+    # Export aggregated comparison
+    # ----------------------------------------------- #
+
     summary_path = (
         output_dir / "comparison_summary.csv"
     )
 
     summary.to_csv(
         summary_path,
-        index=False
+        index=False,
     )
 
-    # Display the final comparison table.
+    # ----------------------------------------------- #
+    # Display results
+    # ----------------------------------------------- #
+
     print("\n===== FINAL COMPARISON =====")
+
+    print("Architecture:", args.arch)
 
     print(
         summary.to_string(
             index=False,
-            float_format=lambda x: f"{x:.4f}"
+            float_format=lambda x: f"{x:.4f}",
         )
     )
 
@@ -257,9 +358,11 @@ def main():
 
     print("Dataset split verification: PASSED")
     print("Model checkpoint loading: PASSED")
+    print("Architecture verification: PASSED")
     print("Segmentation benchmarking: PASSED")
     print("Results completeness: PASSED")
     print("CSV report generation: PASSED")
+    print("Experiment directory isolation: PASSED")
 
     print("\nEvaluation completed successfully.")
 

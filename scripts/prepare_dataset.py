@@ -1,13 +1,19 @@
 
-from src.data.metadata_loader import MetadataLoader
-from pathlib import Path
 import csv
+import sys
+from pathlib import Path
+
+# Ensure project root is in sys.path when script is executed directly
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from tqdm import tqdm
 
 from src.data.dataset_manager import DatasetManager
 from src.data.dataset_splitter import DatasetSplitter
 from src.data.image_preprocessor import ImagePreprocessor
+from src.data.metadata_loader import MetadataLoader
 
 
 def main():
@@ -23,7 +29,7 @@ def main():
 
 
     splitter = DatasetSplitter(
-    metadata_path=root / "data/raw/metadata.csv",
+    metadata_path=metadata_path,
     random_seed=42
 )
 

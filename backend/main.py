@@ -1,0 +1,69 @@
+"""FastAPI entrypoint for SkinSegAI."""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+import sys
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from backend.routes import router
+from backend.routes_v2 import router as router_v2
+from backend.session_manager import SessionManager
+from backend.middleware import APIProtectionMiddleware
+from backend.services import SkinSegBackendService
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize shared API services and manage their lifecycle."""
+    app.state.service = SkinSegBackendService()
+    app.state.session_manager = SessionManager(
+        release_legacy=app.state.service.release_models,
+    )
+
+    try:
+        yield
+    finally:
+        try:
+            app.state.session_manager.close()
+        finally:
+            app.state.session_manager = None
+            app.state.service = None
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="SkinSegAI API",
+        description="Lesion segmentation, uncertainty estimation, and morphology backend.",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
+
+    app.add_middleware(APIProtectionMiddleware)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(router)
+    app.include_router(router_v2)
+    return app
+
+
+app = create_app()
