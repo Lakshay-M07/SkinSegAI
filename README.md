@@ -4,13 +4,15 @@
 
 ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
 ![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Working-brightgreen)
 
 ## Overview
 
-SkinSegAI is an object-oriented, GUI-based skin lesion segmentation and comparative analysis application developed using Python.
+SkinSegAI is an object-oriented skin lesion segmentation and comparative analysis application featuring a **FastAPI + React (Vite + Tailwind CSS)** web workstation alongside a **Streamlit** GUI.
 
 The system supports both a custom lightweight U-Net and ImageNet-pretrained encoder U-Net backbones (`resnet34_unet`, `efficientnet_b2_unet`) trained on dermoscopic images from the ISIC 2018 dataset with a composite edge-sharpening loss, and compares performance against GrabCut, a traditional graph-based image segmentation algorithm.
 
@@ -175,17 +177,18 @@ The application calculates:
 
 All measurements are pixel-based estimates and should not be interpreted as clinical diagnostic indicators.
 
-## Graphical User Interface
+## Web Interface & API
 
-The application provides five interactive sections.
+The primary React + FastAPI workstation provides three top-level tabs:
 
-| Page | Description |
+| Tab / Surface | Description |
 |---|---|
-| Dashboard | Project overview and benchmark statistics |
-| Live Segmentation | Interactive segmentation and lesion analysis |
-| Model Comparison | Quantitative algorithm comparison |
-| Training Analytics | Training loss and performance curves |
-| About Project | Architecture, methodology and OOP concepts |
+| `Workstation` | Curated sample selector, image/GT upload, debounced threshold/opacity/overlay-style controls, U-Net vs. GrabCut panels, single-pass uncertainty heatmap, and TP/FP/FN error map |
+| `Performance Comparison` | Held-out test KPI cards, SVG overlap & latency charts, live lesion morphology comparison, and JSON/CSV/PNG exports |
+| `About Project` | Project overview, key features, key findings, workflow diagram, limitations, and disclaimer |
+| `FastAPI Backend` | `/api/health`, `/api/samples`, `/api/samples/{name}`, `/api/segment`, and `/api/benchmark` with startup checkpoint caching |
+
+A standalone Streamlit workstation is also available in `gui/app.py`.
 
 ## Technology Stack
 
@@ -194,15 +197,17 @@ The application provides five interactive sections.
 | Python | Core application development |
 | PyTorch | Deep learning, custom U-Net training, and CUDA/MPS acceleration |
 | segmentation-models-pytorch & timm | ImageNet-pretrained U-Net encoder backbones |
+| FastAPI & Uvicorn | REST API backend with startup model caching |
+| React, Vite & Tailwind CSS | Modern dark-mode clinical workstation UI |
 | OpenCV | GrabCut and image processing |
-| Streamlit | Graphical user interface |
+| Streamlit | Alternative Python GUI |
 | NumPy | Numerical computation |
 | Pandas | Dataset and benchmark analysis |
 | Pillow | Image loading and manipulation |
-| Plotly | Interactive data visualization |
+| Plotly | Interactive data visualization (Streamlit) |
 | Matplotlib | Scientific visualization |
 | Scikit-learn | Dataset partitioning |
-| Pytest | Automated testing framework |
+| Pytest & HTTPX | Automated unit and API smoke testing |
 
 ## Project Structure
 
@@ -217,12 +222,26 @@ SkinSegAI/
 │   └── metrics/
 │       ├── comparison_summary.csv
 │       └── per_image_results.csv
+├── backend/
+│   ├── main.py
+│   ├── routes.py
+│   ├── schemas.py
+│   └── services.py
 ├── configs/
 ├── data/
 │   ├── raw/
 │   ├── processed_grouped/
 │   └── splits_grouped/
 ├── docs/
+├── frontend/
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.js
+│   └── src/
+│       ├── api/client.js
+│       ├── components/
+│       ├── App.jsx
+│       └── index.css
 ├── gui/
 │   └── app.py
 ├── scripts/
