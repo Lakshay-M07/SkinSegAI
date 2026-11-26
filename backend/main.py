@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.routes import router
+from backend.routes_v2 import router as router_v2
+from backend.session_manager import SessionManager
 from backend.services import SkinSegBackendService
 
 
@@ -21,8 +23,16 @@ from backend.services import SkinSegBackendService
 async def lifespan(app: FastAPI):
     """Load the best default checkpoint once at startup and hold it in memory."""
     app.state.service = SkinSegBackendService()
-    yield
-    app.state.service = None
+    app.state.session_manager = SessionManager()
+
+    try:
+        yield
+    finally:
+        try:
+            app.state.session_manager.close()
+        finally:
+            app.state.session_manager = None
+            app.state.service = None
 
 
 def create_app() -> FastAPI:
@@ -47,6 +57,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(router)
+    app.include_router(router_v2)
     return app
 
 

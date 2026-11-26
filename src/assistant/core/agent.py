@@ -300,6 +300,14 @@ Rules:
                 threshold
             )
 
+    def propose_configuration(self, configuration):
+        """Prepare manual settings through the protected workflow."""
+
+        with self._lock:
+            return self._workflow.propose_configuration(
+                configuration
+            )
+
     def confirm(self, token, *, approved):
         """Trusted application entry point for explicit approval."""
 
