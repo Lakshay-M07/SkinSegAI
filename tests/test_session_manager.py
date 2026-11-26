@@ -256,3 +256,131 @@ class TestSessionManager(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestSharedResourceCoordination(unittest.TestCase):
+
+    def test_legacy_and_assistant_cache_switching(self):
+
+        releases = []
+
+        manager = SessionManager(
+            agent_factory=FakeAgent,
+            release_legacy=lambda: releases.append(True),
+        )
+
+        self.addCleanup(manager.close)
+
+        session_id = manager.create()
+
+        with manager.lease(session_id) as agent:
+
+            self.assertEqual(len(releases), 1)
+            self.assertEqual(agent.release_count, 0)
+
+        with manager.legacy_lease():
+
+            self.assertEqual(agent.release_count, 1)
+            self.assertEqual(agent.reset_count, 0)
+
+        # Repeated legacy requests must not repeatedly
+        # release the same assistant model collection.
+
+        with manager.legacy_lease():
+
+            self.assertEqual(agent.release_count, 1)
+
+        with manager.lease(session_id) as current:
+
+            self.assertIs(current, agent)
+            self.assertEqual(len(releases), 2)
+
+        self.assertEqual(agent.reset_count, 0)
+
+    def test_legacy_and_assistant_operations_are_serialized(self):
+
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        manager = SessionManager(
+            agent_factory=FakeAgent,
+        )
+
+        self.addCleanup(manager.close)
+
+        session_id = manager.create()
+
+        assistant_entered = Event()
+        release_assistant = Event()
+
+        legacy_attempted = Event()
+        legacy_entered = Event()
+
+        events = []
+
+        def assistant_operation():
+
+            with manager.lease(session_id):
+
+                events.append("assistant_start")
+
+                assistant_entered.set()
+
+                if not release_assistant.wait(5):
+
+                    raise TimeoutError(
+                        "Assistant release signal missing."
+                    )
+
+                events.append("assistant_end")
+
+        def legacy_operation():
+
+            legacy_attempted.set()
+
+            with manager.legacy_lease():
+
+                events.append("legacy_start")
+                legacy_entered.set()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+
+            assistant_future = pool.submit(
+                assistant_operation
+            )
+
+            try:
+
+                self.assertTrue(
+                    assistant_entered.wait(5)
+                )
+
+                legacy_future = pool.submit(
+                    legacy_operation
+                )
+
+                self.assertTrue(
+                    legacy_attempted.wait(5)
+                )
+
+                self.assertFalse(
+                    legacy_entered.wait(0.1)
+                )
+
+            finally:
+
+                release_assistant.set()
+
+            assistant_future.result(timeout=5)
+            legacy_future.result(timeout=5)
+
+        self.assertTrue(legacy_entered.is_set())
+
+        self.assertEqual(
+            events,
+            [
+                "assistant_start",
+                "assistant_end",
+                "legacy_start",
+            ],
+        )

@@ -39,6 +39,7 @@ class SessionManager:
         ttl_seconds=1800,
         agent_factory=SkinSegAgent,
         clock=time.monotonic,
+        release_legacy=None,
     ):
 
         if type(max_sessions) is not int or max_sessions < 1:
@@ -65,6 +66,16 @@ class SessionManager:
         self._ttl_seconds = ttl_seconds
         self._agent_factory = agent_factory
         self._clock = clock
+
+        if (
+            release_legacy is not None
+            and not callable(release_legacy)
+        ):
+            raise TypeError(
+                "release_legacy must be callable."
+            )
+
+        self._release_legacy = release_legacy
 
         self._sessions = {}
         self._active_session_id = None
@@ -156,6 +167,11 @@ class SessionManager:
                 session_id
             )
 
+            # The legacy API must not retain a separate
+            # neural model collection during v2 operations.
+            if self._release_legacy is not None:
+                self._release_legacy()
+
             previous_id = self._active_session_id
 
             # Preserve results and memory but release models
@@ -177,6 +193,30 @@ class SessionManager:
 
             finally:
                 record.last_used_at = self._clock()
+
+    @contextmanager
+    def legacy_lease(self):
+        """Serialize legacy inference with assistant operations."""
+
+        with self._lock:
+
+            self._ensure_open()
+            self._cleanup_expired_locked()
+
+            previous_id = self._active_session_id
+
+            if previous_id is not None:
+
+                previous = self._sessions.get(
+                    previous_id
+                )
+
+                if previous is not None:
+                    previous.agent.release_models()
+
+            self._active_session_id = None
+
+            yield
 
     def delete(self, session_id):
 
@@ -222,5 +262,8 @@ class SessionManager:
 
             for session_id in list(self._sessions):
                 self._remove_locked(session_id)
+
+            if self._release_legacy is not None:
+                self._release_legacy()
 
             self._closed = True

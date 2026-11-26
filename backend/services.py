@@ -97,13 +97,19 @@ class SkinSegBackendService:
         if self.checkpoint_path is not None:
             self.unet = UNetSegmenter(self.checkpoint_path)
 
+        self._arch = (
+            self.unet.arch
+            if self.unet is not None
+            else "unavailable"
+        )
+
         self.grabcut = GrabCutSegmenter()
         self.analyzer = LesionAnalyzer()
         self.evaluator = MetricsEvaluator()
 
     @property
     def arch(self) -> str:
-        return self.unet.arch if self.unet is not None else "unavailable"
+        return self._arch
 
     @property
     def device(self) -> str:
@@ -116,6 +122,25 @@ class SkinSegBackendService:
             if torch.backends.mps.is_available()
             else "cpu"
         )
+
+    def release_models(self):
+        """Release the legacy neural model cache."""
+
+        self.unet = None
+
+    def ensure_model_loaded(self):
+        """Restore the legacy model when segmentation is requested."""
+
+        if (
+            self.unet is None
+            and self.checkpoint_path is not None
+        ):
+
+            self.unet = UNetSegmenter(
+                self.checkpoint_path
+            )
+
+            self._arch = self.unet.arch
 
     def list_samples(self) -> list[dict[str, Any]]:
         """List available curated sample images (plus any fallback images in data/)."""
@@ -223,6 +248,8 @@ class SkinSegBackendService:
         gt_mask: np.ndarray | None = None,
     ) -> dict[str, Any]:
         """Run U-Net (with single-pass uncertainty) and GrabCut on the input image."""
+        self.ensure_model_loaded()
+
         if self.unet is None:
             raise RuntimeError("No trained U-Net checkpoint is loaded.")
         if not 0.0 < threshold < 1.0:

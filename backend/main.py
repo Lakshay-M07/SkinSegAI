@@ -22,9 +22,11 @@ from backend.services import SkinSegBackendService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the best default checkpoint once at startup and hold it in memory."""
+    """Initialize shared API services and manage their lifecycle."""
     app.state.service = SkinSegBackendService()
-    app.state.session_manager = SessionManager()
+    app.state.session_manager = SessionManager(
+        release_legacy=app.state.service.release_models,
+    )
 
     try:
         yield

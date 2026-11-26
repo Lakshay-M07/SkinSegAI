@@ -1068,3 +1068,144 @@ def test_report_context_matches_api_context(client):
     ).json()["context"]
 
     assert after == context
+
+
+def test_legacy_and_v2_resource_switching(
+    client,
+    monkeypatch,
+):
+
+    service = client.app.state.service
+    manager = client.app.state.session_manager
+
+    # Legacy model initially loaded during startup.
+
+    assert service.unet is not None
+
+    original_arch = service.arch
+
+    headers, revision = create_session(client)
+
+    # Entering v2 must release the legacy model.
+
+    assert service.unet is None
+    assert service.arch == original_arch
+
+    revision = upload(
+        client,
+        headers,
+        revision,
+    )
+
+    proposal = propose(
+        client,
+        headers,
+        revision,
+        ["custom_unet", "resnet34_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+    )
+
+    assert response.status_code == 200
+
+    before = response.json()["context"]
+
+    assert before["analysis_completed"]
+    assert service.unet is None
+
+    release_calls = []
+
+    # Track resource release without mocking inference.
+
+    with manager.lease(
+        headers["X-Session-ID"]
+    ) as agent:
+
+        original_release = agent.release_models
+
+        def tracked_release():
+
+            release_calls.append(True)
+            return original_release()
+
+        monkeypatch.setattr(
+            agent,
+            "release_models",
+            tracked_release,
+        )
+
+    image, reference = synthetic_image()
+
+    response = client.post(
+        "/api/segment",
+        files={
+            "image": (
+                "image.png",
+                png_bytes(image),
+                "image/png",
+            ),
+            "ground_truth": (
+                "reference.png",
+                png_bytes(reference),
+                "image/png",
+            ),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+    assert "unet" in response.json()
+    assert "grabcut" in response.json()
+
+    # Legacy inference must release assistant models
+    # and restore its own model.
+
+    assert len(release_calls) == 1
+    assert service.unet is not None
+
+    # Return to the v2 interface.
+
+    response = client.get(
+        "/api/v2/context",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+
+    after = response.json()["context"]
+
+    # No image, settings, metrics or results were lost.
+
+    assert before == after
+
+    assert service.unet is None
+    assert service.arch == original_arch
+
+    response = client.get(
+        "/api/v2/results",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 2
+
+    response = client.get(
+        "/api/v2/results/custom_unet/mask",
+        headers=headers,
+        params={
+            "expected_revision": before["revision"],
+        },
+    )
+
+    assert response.status_code == 200
+
+    with Image.open(
+        BytesIO(response.content)
+    ) as mask:
+
+        assert mask.size == image.size
+        mask.verify()

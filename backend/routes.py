@@ -61,7 +61,7 @@ def get_sample(name: str, request: Request) -> SampleDetailResponse:
 
 
 @router.post("/segment", response_model=SegmentResponse)
-async def segment_image(
+def segment_image(
     request: Request,
     image: UploadFile | None = File(default=None),
     sample_id: str | None = Form(default=None),
@@ -76,7 +76,7 @@ async def segment_image(
 
     try:
         if image is not None:
-            raw = await image.read()
+            raw = image.file.read()
             pil_image = decode_image_bytes(raw, mode="RGB")
         elif sample_id:
             safe_stem = Path(sample_id).stem
@@ -97,18 +97,33 @@ async def segment_image(
             )
 
         if ground_truth is not None:
-            gt_raw = await ground_truth.read()
+            gt_raw = ground_truth.file.read()
             gt_pil = decode_image_bytes(gt_raw, mode="L")
             gt_mask = np.asarray(gt_pil) > 0
 
-        result = service.segment(
-            image=pil_image,
-            threshold=threshold,
-            overlay_style=overlay_style,
-            opacity=opacity,
-            include_uncertainty=include_uncertainty,
-            gt_mask=gt_mask,
+        manager = getattr(
+            request.app.state,
+            "session_manager",
+            None,
         )
+
+        if manager is None:
+
+            raise HTTPException(
+                status_code=503,
+                detail="Session manager is unavailable.",
+            )
+
+        with manager.legacy_lease():
+
+            result = service.segment(
+                image=pil_image,
+                threshold=threshold,
+                overlay_style=overlay_style,
+                opacity=opacity,
+                include_uncertainty=include_uncertainty,
+                gt_mask=gt_mask,
+            )
         return SegmentResponse(**result)
     except HTTPException:
         raise
