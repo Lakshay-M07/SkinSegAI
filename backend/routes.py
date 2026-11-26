@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from PIL import Image
 
 from backend.schemas import (
     BenchmarkResponse,
@@ -16,11 +14,18 @@ from backend.schemas import (
     SegmentResponse,
 )
 from backend.services import (
-    SAMPLES_DIR,
-    SAMPLES_MASK_DIR,
     SkinSegBackendService,
-    decode_image_bytes,
+    encode_pil_to_base64,
 )
+
+from backend.image_io import (
+    read_upload,
+    decode_image,
+    decode_reference,
+    mask_to_image,
+)
+
+from backend.sample_io import load_sample
 
 router = APIRouter(prefix="/api", tags=["SkinSegAI"])
 
@@ -53,11 +58,37 @@ def list_samples(request: Request) -> SampleListResponse:
 
 @router.get("/samples/{name}", response_model=SampleDetailResponse)
 def get_sample(name: str, request: Request) -> SampleDetailResponse:
-    service = _get_service(request)
+    _get_service(request)
+
     try:
-        return SampleDetailResponse(**service.get_sample(name))
+
+        image, reference = load_sample(name)
+
+        return SampleDetailResponse(
+            name=name,
+            image_base64=encode_pil_to_base64(image),
+            ground_truth_base64=(
+                encode_pil_to_base64(
+                    mask_to_image(reference)
+                )
+                if reference is not None
+                else None
+            ),
+        )
+
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        raise HTTPException(
+            status_code=404,
+            detail="Requested sample was not found.",
+        ) from exc
+
+    except ValueError as exc:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post("/segment", response_model=SegmentResponse)
@@ -76,20 +107,25 @@ def segment_image(
 
     try:
         if image is not None:
-            raw = image.file.read()
-            pil_image = decode_image_bytes(raw, mode="RGB")
+            pil_image = decode_image(
+                read_upload(image)
+            )
         elif sample_id:
-            safe_stem = Path(sample_id).stem
-            sample_path = SAMPLES_DIR / f"{safe_stem}.png"
-            if not sample_path.is_file():
-                raise HTTPException(
-                    status_code=404, detail=f"Sample '{sample_id}' not found."
+            try:
+
+                pil_image, gt_mask = load_sample(
+                    sample_id,
+                    include_reference=(
+                        ground_truth is None
+                    ),
                 )
-            pil_image = Image.open(sample_path).convert("RGB")
-            if ground_truth is None:
-                gt_path = SAMPLES_MASK_DIR / f"{safe_stem}_segmentation.png"
-                if gt_path.is_file():
-                    gt_mask = np.asarray(Image.open(gt_path).convert("L")) > 0
+
+            except FileNotFoundError as exc:
+
+                raise HTTPException(
+                    status_code=404,
+                    detail="Requested sample was not found.",
+                ) from exc
         else:
             raise HTTPException(
                 status_code=400,
@@ -97,9 +133,9 @@ def segment_image(
             )
 
         if ground_truth is not None:
-            gt_raw = ground_truth.file.read()
-            gt_pil = decode_image_bytes(gt_raw, mode="L")
-            gt_mask = np.asarray(gt_pil) > 0
+            gt_mask = decode_reference(
+                read_upload(ground_truth)
+            )
 
         manager = getattr(
             request.app.state,

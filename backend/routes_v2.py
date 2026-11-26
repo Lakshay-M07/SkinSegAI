@@ -18,7 +18,10 @@ from fastapi import (
     UploadFile,
 )
 
+from backend.sample_io import load_sample
+
 from backend.image_io import (
+    decode_reference,
     read_upload,
     decode_image,
     encode_png,
@@ -31,6 +34,7 @@ from backend.schemas_v2 import (
     ConfirmationRequest,
     ChatRequest,
     RevisionRequest,
+    SampleRequest,
 )
 
 from backend.session_manager import (
@@ -225,9 +229,8 @@ def upload_image(
 
             if ground_truth is not None:
 
-                reference = decode_image(
-                    read_upload(ground_truth),
-                    reference_mask=True,
+                reference = decode_reference(
+                    read_upload(ground_truth)
                 )
 
             response = agent.upload_image(
@@ -658,3 +661,128 @@ def reset_session(
             **response,
             **context_payload(agent),
         }
+
+
+# =====================================================
+# CURATED DATASET SAMPLES
+# =====================================================
+
+@router.get("/samples")
+def list_available_samples(request: Request):
+
+    service = getattr(
+        request.app.state,
+        "service",
+        None,
+    )
+
+    if service is None:
+
+        raise HTTPException(
+            status_code=503,
+            detail="Sample catalogue is unavailable.",
+        )
+
+    return {
+        "samples": service.list_samples(),
+    }
+
+
+@router.post("/sample")
+def select_sample(
+    payload: SampleRequest,
+    request: Request,
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        require_revision(
+            agent,
+            payload.expected_revision,
+        )
+
+        try:
+
+            image, reference = load_sample(
+                payload.sample_id
+            )
+
+            response = agent.upload_image(
+                image,
+                ground_truth=reference,
+            )
+
+        except FileNotFoundError as exc:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Requested sample was not found.",
+            ) from exc
+
+        except (ValueError, TypeError) as exc:
+
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
+
+        return {
+            **response,
+            **context_payload(agent),
+            "sample_id": payload.sample_id,
+        }
+
+
+# =====================================================
+# ORIGINAL IMAGE AND REFERENCE VISUALIZATIONS
+# =====================================================
+
+@router.get("/image")
+def get_session_image(
+    request: Request,
+    expected_revision: int,
+    view: Literal["original", "reference"] = "original",
+    session_id: str = Header(alias="X-Session-ID"),
+):
+
+    with session_agent(request, session_id) as agent:
+
+        require_revision(
+            agent,
+            expected_revision,
+        )
+
+        context = agent.get_context()
+
+        if not context["image_uploaded"]:
+
+            raise HTTPException(
+                status_code=409,
+                detail="No image has been uploaded.",
+            )
+
+        if view == "reference":
+
+            reference = agent.get_ground_truth()
+
+            if reference is None:
+
+                raise HTTPException(
+                    status_code=404,
+                    detail="Reference mask is unavailable.",
+                )
+
+            image = mask_to_image(reference)
+
+        else:
+
+            image = agent.get_image()
+
+        return Response(
+            content=encode_png(image),
+            media_type="image/png",
+            headers={
+                "Cache-Control": "no-store",
+            },
+        )

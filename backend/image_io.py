@@ -121,3 +121,35 @@ def create_error_map(prediction, reference):
     rgb[~prediction & reference] = [59, 130, 246]
 
     return Image.fromarray(rgb)
+
+
+def decode_reference(data):
+    """Decode and validate a binary reference mask."""
+
+    mask = decode_image(
+        data,
+        reference_mask=True,
+    )
+
+    if mask.dtype.kind not in ("b", "u", "i"):
+
+        raise ValueError(
+            "Reference mask must contain binary integer values."
+        )
+
+    binary_01 = np.all(
+        (mask == 0) | (mask == 1)
+    )
+
+    binary_255 = np.all(
+        (mask == 0) | (mask == 255)
+    )
+
+    if not (binary_01 or binary_255):
+
+        raise ValueError(
+            "Reference mask must use binary "
+            "0/1 or 0/255 values."
+        )
+
+    return mask.astype(np.bool_, copy=True)

@@ -1209,3 +1209,389 @@ def test_legacy_and_v2_resource_switching(
 
         assert mask.size == image.size
         mask.verify()
+
+
+# =====================================================
+# CURATED SAMPLES AND SHARED IMAGE VALIDATION
+# =====================================================
+
+@pytest.fixture
+def sample_catalogue(tmp_path, monkeypatch):
+
+    from backend import services
+
+    images = tmp_path / "images"
+    masks = tmp_path / "masks"
+
+    images.mkdir()
+    masks.mkdir()
+
+    image, reference = synthetic_image()
+
+    image.save(images / "ISIC_0000000.png")
+
+    reference.save(
+        masks / "ISIC_0000000_segmentation.png"
+    )
+
+    # A second sample without a reference mask.
+
+    image.save(images / "ISIC_0000003.png")
+
+    monkeypatch.setattr(
+        services,
+        "SAMPLES_DIR",
+        images,
+    )
+
+    monkeypatch.setattr(
+        services,
+        "SAMPLES_MASK_DIR",
+        masks,
+    )
+
+    return images, masks
+
+
+def test_curated_sample_segmentation(
+    client,
+    sample_catalogue,
+):
+
+    response = client.get("/api/v2/samples")
+
+    assert response.status_code == 200
+
+    samples = {
+        item["name"]: item["has_ground_truth"]
+        for item in response.json()["samples"]
+    }
+
+    assert samples == {
+        "ISIC_0000000": True,
+        "ISIC_0000003": False,
+    }
+
+    # Original sample preview remains compatible.
+
+    response = client.get(
+        "/api/samples/ISIC_0000000"
+    )
+
+    assert response.status_code == 200
+
+    assert response.json()["ground_truth_base64"]
+
+    headers, revision = create_session(client)
+
+    response = client.post(
+        "/api/v2/sample",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "sample_id": "ISIC_0000000",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+    context = response.json()["context"]
+
+    assert context["image_uploaded"]
+    assert context["ground_truth_available"]
+    assert not context["analysis_completed"]
+
+    revision = context["revision"]
+
+    for view in ("original", "reference"):
+
+        response = client.get(
+            "/api/v2/image",
+            headers=headers,
+            params={
+                "expected_revision": revision,
+                "view": view,
+            },
+        )
+
+        assert response.status_code == 200
+
+        with Image.open(
+            BytesIO(response.content)
+        ) as visual:
+
+            assert visual.size == (320, 240)
+            visual.verify()
+
+    proposal = propose(
+        client,
+        headers,
+        revision,
+        ["custom_unet"],
+    )
+
+    response = confirm(
+        client,
+        headers,
+        proposal["confirmation_token"],
+    )
+
+    assert response.status_code == 200
+
+    context = response.json()["context"]
+
+    assert context["analysis_completed"]
+
+    assert (
+        context["results"][0]["ground_truth_metrics"]
+        is not None
+    )
+
+
+def test_sample_switch_invalidates_state(
+    client,
+    sample_catalogue,
+):
+
+    headers, revision = create_session(client)
+
+    response = client.post(
+        "/api/v2/sample",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "sample_id": "ISIC_0000000",
+        },
+    )
+
+    assert response.status_code == 200
+
+    revision = response.json()["context"]["revision"]
+
+    proposal = propose(
+        client,
+        headers,
+        revision,
+        ["custom_unet"],
+    )
+
+    token = proposal["confirmation_token"]
+
+    response = client.post(
+        "/api/v2/sample",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "sample_id": "ISIC_0000003",
+        },
+    )
+
+    assert response.status_code == 200
+
+    context = response.json()["context"]
+
+    assert context["revision"] > revision
+
+    assert context["image_uploaded"]
+    assert not context["ground_truth_available"]
+    assert not context["analysis_completed"]
+
+    assert confirm(
+        client,
+        headers,
+        token,
+    ).status_code == 409
+
+    response = client.get(
+        "/api/v2/image",
+        headers=headers,
+        params={
+            "expected_revision": revision,
+            "view": "original",
+        },
+    )
+
+    assert response.status_code == 409
+
+    response = client.get(
+        "/api/v2/image",
+        headers=headers,
+        params={
+            "expected_revision": context["revision"],
+            "view": "reference",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_invalid_sample_identifiers(
+    client,
+    sample_catalogue,
+):
+
+    headers, revision = create_session(client)
+
+    before = client.get(
+        "/api/v2/context",
+        headers=headers,
+    ).json()["context"]
+
+    for name in (
+        "../private",
+        "/tmp/image",
+        "sample.png",
+        "",
+        "nonexistent_sample",
+    ):
+
+        response = client.post(
+            "/api/v2/sample",
+            headers=headers,
+            json={
+                "expected_revision": revision,
+                "sample_id": name,
+            },
+        )
+
+        assert response.status_code in (
+            400, 404, 422,
+        )
+
+    after = client.get(
+        "/api/v2/context",
+        headers=headers,
+    ).json()["context"]
+
+    assert before == after
+
+
+def test_invalid_sample_reference(
+    client,
+    sample_catalogue,
+):
+
+    _, masks = sample_catalogue
+
+    invalid_reference = Image.new(
+        "L", (320, 240), 128
+    )
+
+    invalid_reference.save(
+        masks / "ISIC_0000000_segmentation.png"
+    )
+
+    headers, revision = create_session(client)
+
+    response = client.post(
+        "/api/v2/sample",
+        headers=headers,
+        json={
+            "expected_revision": revision,
+            "sample_id": "ISIC_0000000",
+        },
+    )
+
+    assert response.status_code == 400
+
+    context = client.get(
+        "/api/v2/context",
+        headers=headers,
+    ).json()["context"]
+
+    assert context["revision"] == revision
+    assert not context["image_uploaded"]
+
+    response = client.get(
+        "/api/samples/ISIC_0000000"
+    )
+
+    assert response.status_code == 400
+
+
+def test_legacy_invalid_image_and_reference(client):
+
+    image, _ = synthetic_image()
+
+    invalid_masks = [
+        Image.new("L", (320, 240), 128),
+        Image.new("L", (100, 100), 255),
+        Image.new("RGB", (320, 240), "white"),
+    ]
+
+    for mask in invalid_masks:
+
+        response = client.post(
+            "/api/segment",
+            files={
+                "image": (
+                    "image.png",
+                    png_bytes(image),
+                    "image/png",
+                ),
+                "ground_truth": (
+                    "mask.png",
+                    png_bytes(mask),
+                    "image/png",
+                ),
+            },
+        )
+
+        assert response.status_code == 400
+
+    response = client.post(
+        "/api/segment",
+        files={
+            "image": (
+                "invalid.png",
+                b"not an image",
+                "image/png",
+            ),
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_legacy_binary_reference_encodings(client):
+
+    image, reference = synthetic_image()
+
+    reference_01 = reference.point(
+        lambda value: 1 if value else 0
+    )
+
+    metrics = []
+
+    for mask in (reference, reference_01):
+
+        response = client.post(
+            "/api/segment",
+            files={
+                "image": (
+                    "image.png",
+                    png_bytes(image),
+                    "image/png",
+                ),
+                "ground_truth": (
+                    "mask.png",
+                    png_bytes(mask),
+                    "image/png",
+                ),
+            },
+        )
+
+        assert response.status_code == 200, response.text
+
+        body = response.json()
+
+        assert body["unet"]["metrics"] is not None
+
+        metrics.append(
+            body["unet"]["metrics"]
+        )
+
+    # Binary 0/1 and 0/255 encodings must produce
+    # equivalent reference-mask evaluation.
+
+    assert metrics[0] == metrics[1]
